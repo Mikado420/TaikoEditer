@@ -32,6 +32,8 @@ import { StatusBar } from './components/StatusBar';
 import { ProjectModal } from './components/Modals/ProjectModal';
 import { EventEditModal } from './components/Modals/EventEditModal';
 import { ShortcutsModal } from './components/Modals/ShortcutsModal';
+import { TutorialModal } from './components/Modals/TutorialModal';
+import { UpdateBanner } from './components/PWA/UpdateBanner';
 
 export default function App() {
   // Chart State
@@ -68,11 +70,56 @@ export default function App() {
   // AutoSave & PWA
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
   const [pwaPrompt, setPwaPrompt] = useState<any>(null);
+  const [newSwWorker, setNewSwWorker] = useState<ServiceWorker | null>(null);
 
   // Modals
   const [projectModalOpen, setProjectModalOpen] = useState<boolean>(false);
   const [eventModalOpen, setEventModalOpen] = useState<boolean>(false);
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState<boolean>(false);
+  const [tutorialModalOpen, setTutorialModalOpen] = useState<boolean>(false);
+
+  // First-time tutorial check
+  useEffect(() => {
+    const hasSeenTutorial = localStorage.getItem('taiko_editor_tutorial_seen');
+    if (!hasSeenTutorial) {
+      setTutorialModalOpen(true);
+    }
+  }, []);
+
+  const handleCloseTutorial = () => {
+    localStorage.setItem('taiko_editor_tutorial_seen', 'true');
+    setTutorialModalOpen(false);
+  };
+
+  // Screen Wake Lock while editing/playing
+  useEffect(() => {
+    let wakeLock: any = null;
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch (e) {
+        // Ignore if wakeLock fails or permission denied
+      }
+    };
+    requestWakeLock();
+
+    return () => {
+      if (wakeLock) wakeLock.release().catch(() => {});
+    };
+  }, []);
+
+  // SW Update Listener
+  useEffect(() => {
+    const handleSwUpdate = (e: any) => {
+      if (e.detail) {
+        setNewSwWorker(e.detail);
+      }
+    };
+    window.addEventListener('swUpdateAvailable', handleSwUpdate);
+    return () => window.removeEventListener('swUpdateAvailable', handleSwUpdate);
+  }, []);
 
   // Load IndexedDB charts on boot
   useEffect(() => {
@@ -429,6 +476,16 @@ export default function App() {
       <ShortcutsModal
         isOpen={shortcutsModalOpen}
         onClose={() => setShortcutsModalOpen(false)}
+      />
+
+      <TutorialModal
+        isOpen={tutorialModalOpen}
+        onClose={handleCloseTutorial}
+      />
+
+      <UpdateBanner
+        newWorker={newSwWorker}
+        onDismiss={() => setNewSwWorker(null)}
       />
     </div>
   );

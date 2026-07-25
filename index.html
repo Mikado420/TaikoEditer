@@ -6,19 +6,32 @@
     <meta name="theme-color" content="#1B1B1B" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <title>Taiko Chart Editor - スマホ最適化太鼓譜面エディタ</title>
+    <meta name="apple-mobile-web-app-title" content="太鼓譜面" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <title>Taiko Chart Editor - PWA 太鼓譜面エディタ</title>
   </head>
-  <body class="bg-[#1B1B1B] text-white select-none overflow-hidden touch-none font-sans">
+  <body class="bg-[#1B1B1B] text-white select-none overflow-hidden touch-none font-sans safe-pl safe-pr safe-pt safe-pb">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW registration failed: ', err));
+          navigator.serviceWorker.register('sw.js').then(reg => {
+            reg.addEventListener('updatefound', () => {
+              const newWorker = reg.installing;
+              if (newWorker) {
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // Dispatch custom event for App UI to show "New version available" banner
+                    window.dispatchEvent(new CustomEvent('swUpdateAvailable', { detail: newWorker }));
+                  }
+                });
+              }
+            });
+          }).catch(err => console.log('SW registration error:', err));
         });
       }
     </script>
   </body>
 </html>
-

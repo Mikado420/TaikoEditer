@@ -1,22 +1,44 @@
 {
-  "name": "Taiko Chart Editor",
-  "short_name": "TaikoEditor",
-  "description": "Smartphone-optimized PWA Taiko drum chart editor with TJA import/export, WebAudio playback, waveform timeline, and offline support.",
-  "start_url": "/",
+  "id": "taiko-chart-editor-pwa",
+  "name": "Taiko Chart Editor - スマホ最適化太鼓譜面エディタ",
+  "short_name": "太鼓譜面",
+  "description": "スマホで快適に操作できる太鼓譜面エディタ。完全オフライン動作・TJA対応・横画面固定PWA。",
+  "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
   "orientation": "landscape",
   "background_color": "#1B1B1B",
   "theme_color": "#1B1B1B",
+  "categories": ["music", "utilities", "productivity"],
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
-      "src": "/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "新規譜面作成",
+      "short_name": "新規作成",
+      "description": "新しい太鼓譜面を作成します",
+      "url": "./index.html?action=new"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Taiko Chart Editor Landscape"
     }
   ]
 }
