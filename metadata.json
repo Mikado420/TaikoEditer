@@ -1,0 +1,6 @@
+{
+  "name": "Taiko Chart Editor",
+  "description": "Smartphone-optimized PWA Taiko drum chart editor with TJA import/export, WebAudio playback, waveform timeline, and offline support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
