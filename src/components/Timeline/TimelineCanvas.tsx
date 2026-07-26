@@ -53,11 +53,20 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     timeSeconds: number;
   } | null>(null);
 
-  // Dragging note length or position
-  const [dragInfo, setDragInfo] = useState<{
-    noteId: string;
-    mode: 'move' | 'resize';
-  } | null>(null);
+  // Dragging state for smooth horizontal scrolling / seeking
+  const pointerRef = useRef<{
+    isDown: boolean;
+    startX: number;
+    startY: number;
+    startTime: number;
+    hasDragged: boolean;
+  }>({
+    isDown: false,
+    startX: 0,
+    startY: 0,
+    startTime: 0,
+    hasDragged: false,
+  });
 
   // Base layout pixels
   const basePxPerMeasure = 220;
@@ -97,26 +106,26 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
       // Track Lanes Dimensions
       const headerH = 22;
-      const waveformH = 34;
+      const waveformH = 36;
       const eventsH = 20;
-      const notesLaneY = headerH + waveformH + eventsH + 24;
+      const notesLaneY = headerH + waveformH + eventsH + 26;
 
       // 1. Canvas Background
-      ctx.fillStyle = '#161616';
+      ctx.fillStyle = '#141414';
       ctx.fillRect(scrollX, 0, width, height);
 
       // Lane dividers
-      ctx.fillStyle = '#222222';
+      ctx.fillStyle = '#1A1A1A';
       ctx.fillRect(scrollX, headerH, width, waveformH);
       ctx.fillRect(scrollX, headerH + waveformH + eventsH, width, height);
 
-      ctx.fillStyle = '#333333';
+      ctx.fillStyle = '#2D2D2D';
       ctx.fillRect(scrollX, headerH + waveformH, width, 1);
       ctx.fillRect(scrollX, headerH + waveformH + eventsH, width, 1);
 
       // 2. Waveform Background
       if (audioPeaks && audioPeaks.length > 0) {
-        ctx.fillStyle = 'rgba(0, 204, 255, 0.25)';
+        ctx.fillStyle = 'rgba(0, 204, 255, 0.35)';
         const totalDuration = measures[measures.length - 1]?.timeSeconds || 120;
         const step = 2;
 
@@ -129,7 +138,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           if (t >= 0 && t <= totalDuration) {
             const peakIdx = Math.floor((t / totalDuration) * audioPeaks.length);
             const peakVal = audioPeaks[peakIdx] || 0;
-            const h = peakVal * waveformH * 0.8;
+            const h = peakVal * waveformH * 0.85;
             ctx.fillRect(px, headerH + (waveformH - h) / 2, step, Math.max(1, h));
           }
         }
@@ -144,17 +153,17 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
         if (mX >= scrollX - 50 && mX <= scrollX + width + 50) {
           // Major Measure Barline
-          ctx.strokeStyle = '#4A4A4A';
-          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = '#555555';
+          ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(mX, 0);
           ctx.lineTo(mX, height);
           ctx.stroke();
 
           // Measure Number Header
-          ctx.fillStyle = '#888888';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.fillText(`M${m + 1}`, mX + 4, 14);
+          ctx.fillStyle = '#AAAAAA';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.fillText(`M${m + 1}`, mX + 5, 15);
 
           // Grid ticks according to Snap
           const ticksCount = Math.max(4, snap);
@@ -165,7 +174,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             ctx.beginPath();
             ctx.moveTo(tickX, isQuarter ? headerH : headerH + waveformH + eventsH);
             ctx.lineTo(tickX, height);
-            ctx.strokeStyle = isQuarter ? '#333333' : '#222222';
+            ctx.strokeStyle = isQuarter ? '#383838' : '#262626';
             ctx.lineWidth = 1;
             ctx.stroke();
           }
@@ -192,7 +201,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               : '#A855F7';
           ctx.fill();
 
-          ctx.fillStyle = '#BBBBBB';
+          ctx.fillStyle = '#CCCCCC';
           ctx.font = '9px sans-serif';
           ctx.fillText(ev.value ? `${ev.type}:${ev.value}` : ev.type, evX + 6, evY + 3);
         }
@@ -223,7 +232,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
         if (noteX >= scrollX - 100 && noteX <= scrollX + width + 100) {
           const isSelected = selectedNoteIds.includes(note.id);
-          const r = note.type === 3 || note.type === 4 || note.type === 6 ? 12 : 9;
+          const r = note.type === 3 || note.type === 4 || note.type === 6 ? 13 : 10;
 
           // Draw long roll/balloon tail line
           if (note.type === 5 || note.type === 6 || note.type === 7) {
@@ -231,10 +240,9 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             const endM = timeToMeasureAndPos(note.timeSeconds + duration, measures);
             const endX = (endM.measureIndex + endM.positionInMeasure) * pxPerMeasure;
 
-            ctx.fillStyle = note.type === 7 ? 'rgba(255, 136, 0, 0.7)' : 'rgba(255, 204, 0, 0.7)';
-            ctx.fillRect(noteX, notesLaneY - r / 2, Math.max(8, endX - noteX), r);
+            ctx.fillStyle = note.type === 7 ? 'rgba(255, 136, 0, 0.75)' : 'rgba(255, 204, 0, 0.75)';
+            ctx.fillRect(noteX, notesLaneY - r / 2, Math.max(10, endX - noteX), r);
 
-            // Resize handle knob on end of roll
             ctx.beginPath();
             ctx.arc(endX, notesLaneY, r * 0.8, 0, Math.PI * 2);
             ctx.fillStyle = '#FFFFFF';
@@ -270,7 +278,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           ctx.fill();
 
           ctx.strokeStyle = isSelected ? '#FFFFFF' : '#000000';
-          ctx.lineWidth = isSelected ? 2.5 : 1.5;
+          ctx.lineWidth = isSelected ? 3 : 1.5;
           ctx.stroke();
 
           if (isSelected) {
@@ -283,19 +291,20 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         }
       }
 
-      // 7. Draw Playhead Needle
+      // 7. Prominent Playhead Needle
       ctx.strokeStyle = '#FF5A36';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(playheadX, 0);
       ctx.lineTo(playheadX, height);
       ctx.stroke();
 
+      // Playhead Top Indicator Knob
       ctx.fillStyle = '#FF5A36';
       ctx.beginPath();
-      ctx.moveTo(playheadX - 6, 0);
-      ctx.lineTo(playheadX + 6, 0);
-      ctx.lineTo(playheadX, 8);
+      ctx.moveTo(playheadX - 7, 0);
+      ctx.lineTo(playheadX + 7, 0);
+      ctx.lineTo(playheadX, 10);
       ctx.closePath();
       ctx.fill();
 
@@ -332,108 +341,146 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     rollStartPoint,
   ]);
 
-  // Pointer Click / Tap Handler (Unified Tap to Add or Delete)
+  // Pointer Handlers for Tap, Drag, and Horizontal Scrubbing
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
+    pointerRef.current = {
+      isDown: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      startTime: currentTime,
+      hasDragged: false,
+    };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
 
-    const playheadM = timeToMeasureAndPos(currentTime, measures);
-    const scrollX = Math.max(
-      0,
-      (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure - rect.width * 0.25
-    );
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!pointerRef.current.isDown) return;
 
-    const targetX = clickX + scrollX;
-    const exactMeasure = targetX / pxPerMeasure;
-    const measureIndex = Math.max(0, Math.floor(exactMeasure));
-    const rawPos = exactMeasure - measureIndex;
-    const snappedPos = snapPosition(rawPos, snap);
-
-    const timeSeconds = measureAndPosToTime(measureIndex, snappedPos, measures);
-
-    // Rule 1: Check if tapping an existing note -> Delete Note instantly!
-    const existingNote = chart.notes.find((n) => {
-      if (n.type === 0) return false;
-      const nX = (n.measureIndex + n.positionInMeasure) * pxPerMeasure;
-      return Math.abs(nX - targetX) < 18;
-    });
-
-    if (existingNote) {
-      audioEngine.playHitSound(existingNote.type);
-      onDeleteNote(existingNote.id);
-      setRollStartPoint(null);
-      return;
+    const dx = e.clientX - pointerRef.current.startX;
+    if (Math.abs(dx) > 6) {
+      pointerRef.current.hasDragged = true;
     }
 
-    // Rule 2: If selecting Roll (5), Big Roll (6), or Balloon (7)
-    if (selectedNoteType === 5 || selectedNoteType === 6 || selectedNoteType === 7) {
-      if (!rollStartPoint) {
-        // Step 1: Set Start Point
-        setRollStartPoint({
-          measureIndex,
-          positionInMeasure: snappedPos,
-          timeSeconds,
-        });
-        audioEngine.playHitSound(selectedNoteType);
-        return;
-      } else {
-        // Step 2: Set End Point and create long roll note
-        const startTime = rollStartPoint.timeSeconds;
-        const endTime = timeSeconds;
+    if (pointerRef.current.hasDragged) {
+      // Horizontal Drag to Scrub Playhead / Scroll
+      const deltaMeasures = -dx / pxPerMeasure;
+      const startM = timeToMeasureAndPos(pointerRef.current.startTime, measures);
+      const newMeasureIdx = startM.measureIndex + deltaMeasures;
+      const targetM = Math.max(0, newMeasureIdx);
+      const targetMIdx = Math.floor(targetM);
+      const targetPos = targetM - targetMIdx;
 
-        let finalStartM = rollStartPoint.measureIndex;
-        let finalStartPos = rollStartPoint.positionInMeasure;
-        let finalStartTime = startTime;
-        let duration = Math.abs(endTime - startTime);
+      const newTime = measureAndPosToTime(targetMIdx, targetPos, measures);
+      onSeek(newTime);
+    }
+  };
 
-        if (endTime < startTime) {
-          finalStartM = measureIndex;
-          finalStartPos = snappedPos;
-          finalStartTime = endTime;
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!pointerRef.current.isDown) return;
+    const canvas = canvasRef.current;
+
+    if (!pointerRef.current.hasDragged && canvas) {
+      // Execute Single Tap Action (Add or Delete Note)
+      const rect = canvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+
+      const playheadM = timeToMeasureAndPos(currentTime, measures);
+      const scrollX = Math.max(
+        0,
+        (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure - rect.width * 0.25
+      );
+
+      const targetX = clickX + scrollX;
+      const exactMeasure = targetX / pxPerMeasure;
+      const measureIndex = Math.max(0, Math.floor(exactMeasure));
+      const rawPos = exactMeasure - measureIndex;
+      const snappedPos = snapPosition(rawPos, snap);
+
+      const timeSeconds = measureAndPosToTime(measureIndex, snappedPos, measures);
+
+      // Rule 1: Tap existing note -> Delete
+      const existingNote = chart.notes.find((n) => {
+        if (n.type === 0) return false;
+        const nX = (n.measureIndex + n.positionInMeasure) * pxPerMeasure;
+        return Math.abs(nX - targetX) < 18;
+      });
+
+      if (existingNote) {
+        audioEngine.playHitSound(existingNote.type);
+        onDeleteNote(existingNote.id);
+        setRollStartPoint(null);
+      } else if (selectedNoteType === 5 || selectedNoteType === 6 || selectedNoteType === 7) {
+        // Rule 2: Roll / Balloon section placement
+        if (!rollStartPoint) {
+          setRollStartPoint({
+            measureIndex,
+            positionInMeasure: snappedPos,
+            timeSeconds,
+          });
+          audioEngine.playHitSound(selectedNoteType);
+        } else {
+          const startTime = rollStartPoint.timeSeconds;
+          const endTime = timeSeconds;
+
+          let finalStartM = rollStartPoint.measureIndex;
+          let finalStartPos = rollStartPoint.positionInMeasure;
+          let finalStartTime = startTime;
+          let duration = Math.abs(endTime - startTime);
+
+          if (endTime < startTime) {
+            finalStartM = measureIndex;
+            finalStartPos = snappedPos;
+            finalStartTime = endTime;
+          }
+
+          if (duration < 0.1) duration = 0.4;
+
+          const newNote: Note = {
+            id: `note_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            type: selectedNoteType,
+            measureIndex: finalStartM,
+            positionInMeasure: finalStartPos,
+            timeSeconds: finalStartTime,
+            durationSeconds: duration,
+          };
+
+          onAddNote(newNote);
+          audioEngine.playHitSound(selectedNoteType);
+          setRollStartPoint(null);
         }
-
-        if (duration < 0.1) duration = 0.4;
-
+      } else {
+        // Rule 3: Single Tap Note Placement
         const newNote: Note = {
           id: `note_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           type: selectedNoteType,
-          measureIndex: finalStartM,
-          positionInMeasure: finalStartPos,
-          timeSeconds: finalStartTime,
-          durationSeconds: duration,
+          measureIndex,
+          positionInMeasure: snappedPos,
+          timeSeconds,
         };
 
         onAddNote(newNote);
         audioEngine.playHitSound(selectedNoteType);
-        setRollStartPoint(null);
-        return;
+        onSeek(timeSeconds);
       }
     }
 
-    // Rule 3: Single-Tap Note Placement (Don, Ka, Don Big, Ka Big = 1, 2, 3, 4)
-    const newNote: Note = {
-      id: `note_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      type: selectedNoteType,
-      measureIndex,
-      positionInMeasure: snappedPos,
-      timeSeconds,
-    };
-
-    onAddNote(newNote);
-    audioEngine.playHitSound(selectedNoteType);
-    onSeek(timeSeconds);
+    pointerRef.current.isDown = false;
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (_) {}
   };
 
   return (
     <div
       ref={containerRef}
-      className="h-[110px] sm:h-[150px] max-h-[30vh] bg-[#181818] border-t border-[#3A3A3A] relative select-none touch-none shrink-0 safe-pl safe-pr"
+      className="h-[120px] sm:h-[160px] max-h-[35vh] bg-[#141414] border-t border-[#333333] relative select-none touch-none shrink-0 safe-pl safe-pr"
     >
       <canvas
         ref={canvasRef}
         onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         className="w-full h-full cursor-crosshair block"
       />
 

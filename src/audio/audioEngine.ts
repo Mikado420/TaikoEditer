@@ -13,17 +13,18 @@ export class AudioEngine {
   private pauseOffset = 0; // Position in audio in seconds when paused
   private playbackRate = 1.0;
 
+  private sfxMuted = false;
+  private sfxVolume = 0.8;
+
   private waveformPeaks: Float32Array | null = null;
   private onTimeUpdateCallbacks: Set<(time: number) => void> = new Set();
   private animFrameId: number | null = null;
 
-  constructor() {
-    // AudioContext will be initialized on first user gesture
-  }
-
   public initContext(): AudioContext {
     if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioCtx();
     }
     if (this.ctx.state === 'suspended') {
@@ -72,6 +73,13 @@ export class AudioEngine {
     return peaks;
   }
 
+  public getWaveformPeaks(samplesCount = 1000): Float32Array | null {
+    if (!this.waveformPeaks) {
+      return this.generateWaveformPeaks(samplesCount);
+    }
+    return this.waveformPeaks;
+  }
+
   public getPeaks(): Float32Array | null {
     return this.waveformPeaks;
   }
@@ -99,7 +107,6 @@ export class AudioEngine {
         }
       };
     } else {
-      // Synthetic timer play if no audio file loaded
       this.startTime = ctx.currentTime - this.pauseOffset / this.playbackRate;
     }
 
@@ -124,6 +131,12 @@ export class AudioEngine {
     }
   }
 
+  public stop(): void {
+    this.pause();
+    this.pauseOffset = 0;
+    this.notifyTimeUpdate(0);
+  }
+
   public seek(timeSeconds: number): void {
     const wasPlaying = this.isPlaying;
     if (wasPlaying) this.pause();
@@ -132,11 +145,23 @@ export class AudioEngine {
     if (wasPlaying) this.play(this.pauseOffset);
   }
 
-  public setSpeed(speed: number): void {
+  public setPlaybackRate(speed: number): void {
     this.playbackRate = speed;
     if (this.sourceNode) {
       this.sourceNode.playbackRate.value = speed;
     }
+  }
+
+  public setSpeed(speed: number): void {
+    this.setPlaybackRate(speed);
+  }
+
+  public setSfxMuted(muted: boolean): void {
+    this.sfxMuted = muted;
+  }
+
+  public setSfxVolume(vol: number): void {
+    this.sfxVolume = Math.max(0, Math.min(1, vol));
   }
 
   public getCurrentTime(): number {
@@ -156,8 +181,11 @@ export class AudioEngine {
   }
 
   public playHitSound(type: number): void {
+    if (this.sfxMuted) return;
+
     const ctx = this.initContext();
     const now = ctx.currentTime;
+    const masterVol = this.sfxVolume;
 
     if (type === 1 || type === 3) {
       // Don (1) or Big Don (3) - Red Drum
@@ -166,7 +194,7 @@ export class AudioEngine {
 
       const isBig = type === 3;
       const baseFreq = isBig ? 130 : 170;
-      const vol = isBig ? 0.9 : 0.7;
+      const vol = (isBig ? 0.9 : 0.7) * masterVol;
 
       osc.type = 'sine';
       osc.frequency.setValueAtTime(baseFreq, now);
@@ -183,9 +211,8 @@ export class AudioEngine {
     } else if (type === 2 || type === 4) {
       // Ka (2) or Big Ka (4) - Blue Rimshot
       const isBig = type === 4;
-      const vol = isBig ? 0.8 : 0.6;
+      const vol = (isBig ? 0.8 : 0.6) * masterVol;
 
-      // High pitch oscillator
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
@@ -202,7 +229,6 @@ export class AudioEngine {
       osc.start(now);
       osc.stop(now + 0.08);
 
-      // Noise burst for rim attack
       const bufferSize = ctx.sampleRate * 0.05;
       const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const output = noiseBuffer.getChannelData(0);
@@ -226,6 +252,28 @@ export class AudioEngine {
       noiseGain.connect(ctx.destination);
 
       noise.start(now);
+    } else if (type === 5 || type === 6 || type === 7) {
+      // Roll / Big Roll / Balloon sound
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      const isBalloon = type === 7;
+      const isBig = type === 6;
+      const freq = isBalloon ? 440 : isBig ? 220 : 330;
+      const vol = 0.7 * masterVol;
+
+      osc.type = isBalloon ? 'square' : 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+
+      gain.gain.setValueAtTime(vol, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.1);
     }
   }
 
