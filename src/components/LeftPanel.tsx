@@ -1,11 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   X,
   Plus,
   Trash2,
   Activity,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { ChartEvent } from '../types/chart';
+import { audioEngine } from '../audio/audioEngine';
 
 interface LeftPanelProps {
   isOpen: boolean;
@@ -24,7 +27,21 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
   onAddEventClick,
   onDeleteEvent,
 }) => {
+  const [sfxMuted, setSfxMuted] = useState(false);
+  const [sfxVolume, setSfxVolume] = useState(0.8);
+
   if (!isOpen) return null;
+
+  const handleMuteToggle = () => {
+    const newMuted = !sfxMuted;
+    setSfxMuted(newMuted);
+    audioEngine.setSfxMuted(newMuted);
+  };
+
+  const handleVolumeChange = (vol: number) => {
+    setSfxVolume(vol);
+    audioEngine.setSfxVolume(vol);
+  };
 
   const sortedEvents = [...events].sort((a, b) => {
     if (a.measureIndex !== b.measureIndex) return a.measureIndex - b.measureIndex;
@@ -88,39 +105,76 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
         <div className="h-11 px-3 bg-[#202020] border-b border-[#3A3A3A] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-1.5 font-bold text-gray-200 text-sm">
             <Activity size={16} className="text-[#FF5A36]" />
-            <span>イベント管理</span>
-            <span className="text-xs text-gray-400 font-normal">({events.length})</span>
+            <span>環境・イベント管理</span>
           </div>
-          <div className="flex items-center gap-1.5">
+          <button
+            onClick={onClose}
+            className="p-1 text-gray-400 hover:text-white hover:bg-[#333333] rounded-lg transition"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Audio / SFX Settings Section */}
+        <div className="p-3 bg-[#1F1F1F] border-b border-[#2D2D2D] space-y-2 shrink-0">
+          <div className="flex items-center justify-between text-gray-300 font-bold text-xs">
+            <div className="flex items-center gap-1.5">
+              {sfxMuted ? (
+                <VolumeX size={15} className="text-rose-400" />
+              ) : (
+                <Volume2 size={15} className="text-amber-400" />
+              )}
+              <span>打音 (SE) 設定</span>
+            </div>
             <button
-              onClick={onAddEventClick}
-              className="flex items-center gap-1 px-2 py-1 bg-[#FF5A36] hover:bg-[#ff6f4f] text-white font-bold rounded-lg transition active:scale-95 text-xs shadow"
+              onClick={handleMuteToggle}
+              className={`px-2 py-0.5 rounded font-bold text-[10px] transition ${
+                sfxMuted
+                  ? 'bg-rose-950/60 border border-rose-600 text-rose-300'
+                  : 'bg-emerald-950/60 border border-emerald-600 text-emerald-300'
+              }`}
             >
-              <Plus size={14} />
-              <span>追加</span>
+              {sfxMuted ? '消音中 (OFF)' : '打音 (ON)'}
             </button>
-            <button
-              onClick={onClose}
-              className="p-1 text-gray-400 hover:text-white hover:bg-[#333333] rounded-lg transition"
-            >
-              <X size={18} />
-            </button>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <span className="text-[10px] text-gray-400 w-12 font-medium">音量</span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={sfxVolume}
+              onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+              disabled={sfxMuted}
+              className="flex-1 accent-[#FF5A36] h-1.5 bg-[#333333] rounded-lg cursor-pointer"
+            />
+            <span className="text-[10px] text-gray-300 font-mono w-8 text-right">
+              {Math.round(sfxVolume * 100)}%
+            </span>
           </div>
         </div>
 
-        {/* Categories Bar */}
-        <div className="px-3 py-2 bg-[#1C1C1C] border-b border-[#2A2A2A] flex flex-wrap gap-1 text-[10px] text-gray-400 font-medium shrink-0">
-          <span className="px-1.5 py-0.5 bg-[#282828] rounded">BPM</span>
-          <span className="px-1.5 py-0.5 bg-[#282828] rounded">SCROLL</span>
-          <span className="px-1.5 py-0.5 bg-[#282828] rounded">MEASURE</span>
-          <span className="px-1.5 py-0.5 bg-[#282828] rounded">GOGO</span>
-          <span className="px-1.5 py-0.5 bg-[#282828] rounded">DELAY</span>
+        {/* Events Sub-header */}
+        <div className="px-3 py-2 bg-[#222222] border-b border-[#2A2A2A] flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-1 font-bold text-gray-300 text-xs">
+            <span>譜面イベント一覧</span>
+            <span className="text-[10px] text-gray-400 font-normal">({events.length})</span>
+          </div>
+          <button
+            onClick={onAddEventClick}
+            className="flex items-center gap-1 px-2 py-0.5 bg-[#FF5A36] hover:bg-[#ff6f4f] text-white font-bold rounded-lg transition active:scale-95 text-[11px] shadow"
+          >
+            <Plus size={12} />
+            <span>追加</span>
+          </button>
         </div>
 
         {/* Event List */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5 custom-scrollbar">
           {sortedEvents.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 text-xs">
+            <div className="text-center py-10 text-gray-500 text-xs">
               イベントがありません
               <br />
               <button

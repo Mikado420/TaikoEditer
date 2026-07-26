@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Plus, Activity } from 'lucide-react';
 import { ChartEvent, EventType } from '../../types/chart';
+import { BufferedNumberInput } from '../BufferedNumberInput';
 
 interface EventEditModalProps {
   isOpen: boolean;
@@ -90,13 +91,12 @@ export const EventEditModal: React.FC<EventEditModalProps> = ({
                 {type === 'SCROLL' && 'スクロール倍率 (例: 1.5)'}
                 {type === 'DELAY' && '停止時間 [秒] (例: 0.5)'}
               </label>
-              <input
-                type="number"
+              <BufferedNumberInput
                 step="0.01"
+                defaultValue={type === 'BPMCHANGE' ? 140 : 1.0}
                 value={value}
-                onChange={(e) => setValue(parseFloat(e.target.value) || 0)}
+                onChange={(val) => setValue(val)}
                 className="w-full bg-[#242424] border border-[#3A3A3A] rounded px-2 py-1.5 text-gray-200 focus:outline-none focus:border-[#FF5A36]"
-                required
               />
             </div>
           )}
@@ -107,10 +107,11 @@ export const EventEditModal: React.FC<EventEditModalProps> = ({
                 <label className="text-[10px] uppercase font-semibold text-gray-400 mb-1 block">
                   分子 (Numerator)
                 </label>
-                <input
-                  type="number"
+                <BufferedNumberInput
+                  min={1}
+                  defaultValue={4}
                   value={numerator}
-                  onChange={(e) => setNumerator(parseInt(e.target.value, 10) || 4)}
+                  onChange={(val) => setNumerator(val)}
                   className="w-full bg-[#242424] border border-[#3A3A3A] rounded px-2 py-1.5 text-gray-200 focus:outline-none focus:border-[#FF5A36]"
                 />
               </div>
@@ -118,10 +119,11 @@ export const EventEditModal: React.FC<EventEditModalProps> = ({
                 <label className="text-[10px] uppercase font-semibold text-gray-400 mb-1 block">
                   分母 (Denominator)
                 </label>
-                <input
-                  type="number"
+                <BufferedNumberInput
+                  min={1}
+                  defaultValue={4}
                   value={denominator}
-                  onChange={(e) => setDenominator(parseInt(e.target.value, 10) || 4)}
+                  onChange={(val) => setDenominator(val)}
                   className="w-full bg-[#242424] border border-[#3A3A3A] rounded px-2 py-1.5 text-gray-200 focus:outline-none focus:border-[#FF5A36]"
                 />
               </div>

@@ -4,6 +4,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import { ChartHeader } from '../types/chart';
+import { BufferedNumberInput } from './BufferedNumberInput';
 
 interface RightPanelProps {
   isOpen: boolean;
@@ -93,11 +94,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">
                 BPM (基本)
               </label>
-              <input
-                type="number"
+              <BufferedNumberInput
                 step="0.01"
+                defaultValue={120}
                 value={header.bpm}
-                onChange={(e) => handleChange('bpm', parseFloat(e.target.value) || 120)}
+                onChange={(val) => handleChange('bpm', val)}
                 className="w-full bg-[#242424] border border-[#3A3A3A] rounded-lg px-2.5 py-1.5 text-gray-100 font-mono font-bold focus:outline-none focus:border-[#FF5A36]"
               />
             </div>
@@ -105,11 +106,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">
                 Offset (秒)
               </label>
-              <input
-                type="number"
+              <BufferedNumberInput
                 step="0.001"
+                defaultValue={0}
                 value={header.offset}
-                onChange={(e) => handleChange('offset', parseFloat(e.target.value) || 0)}
+                onChange={(val) => handleChange('offset', val)}
                 className="w-full bg-[#242424] border border-[#3A3A3A] rounded-lg px-2.5 py-1.5 text-gray-100 font-mono focus:outline-none focus:border-[#FF5A36]"
               />
             </div>
@@ -132,11 +133,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">
                 DemoStart (秒)
               </label>
-              <input
-                type="number"
+              <BufferedNumberInput
                 step="0.1"
+                defaultValue={0}
                 value={header.demoStart}
-                onChange={(e) => handleChange('demoStart', parseFloat(e.target.value) || 0)}
+                onChange={(val) => handleChange('demoStart', val)}
                 className="w-full bg-[#242424] border border-[#3A3A3A] rounded-lg px-2.5 py-1.5 text-gray-100 font-mono focus:outline-none focus:border-[#FF5A36]"
               />
             </div>
@@ -164,12 +165,12 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">
                 Level (難易度 ★1〜10)
               </label>
-              <input
-                type="number"
-                min="1"
-                max="10"
+              <BufferedNumberInput
+                min={1}
+                max={10}
+                defaultValue={1}
                 value={header.level}
-                onChange={(e) => handleChange('level', parseInt(e.target.value, 10) || 1)}
+                onChange={(val) => handleChange('level', val)}
                 className="w-full bg-[#242424] border border-[#3A3A3A] rounded-lg px-2.5 py-1.5 text-amber-400 font-bold focus:outline-none focus:border-[#FF5A36]"
               />
             </div>
@@ -207,10 +208,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">
                 ScoreInit (初項)
               </label>
-              <input
-                type="number"
+              <BufferedNumberInput
+                defaultValue={0}
                 value={header.scoreInit}
-                onChange={(e) => handleChange('scoreInit', parseInt(e.target.value, 10) || 0)}
+                onChange={(val) => handleChange('scoreInit', val)}
                 className="w-full bg-[#242424] border border-[#3A3A3A] rounded-lg px-2.5 py-1.5 text-gray-100 font-mono focus:outline-none focus:border-[#FF5A36]"
               />
             </div>
@@ -218,10 +219,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               <label className="text-[10px] text-gray-400 font-bold uppercase mb-1 block">
                 ScoreDiff (公差)
               </label>
-              <input
-                type="number"
+              <BufferedNumberInput
+                defaultValue={0}
                 value={header.scoreDiff}
-                onChange={(e) => handleChange('scoreDiff', parseInt(e.target.value, 10) || 0)}
+                onChange={(val) => handleChange('scoreDiff', val)}
                 className="w-full bg-[#242424] border border-[#3A3A3A] rounded-lg px-2.5 py-1.5 text-gray-100 font-mono focus:outline-none focus:border-[#FF5A36]"
               />
             </div>

@@ -394,15 +394,17 @@ export default function App() {
         onToggleRightPanel={() => setRightPanelOpen(!rightPanelOpen)}
       />
 
-      {/* 2. Main Center Workstation Area (>70% space) */}
-      <main className="flex-1 flex overflow-hidden relative w-full h-full">
-        {/* Central Taiko Lane Real-time Preview */}
-        <CentralCanvas
-          chart={chart}
-          measures={measures}
-          currentTime={currentTime}
-          isPlaying={isPlaying}
-        />
+      {/* 2. Main Center Workstation Area */}
+      <main className="flex-1 flex flex-col overflow-hidden relative w-full h-full">
+        {/* Central Taiko Lane Real-time Preview (Top Game View) */}
+        <div className="flex-1 min-h-[140px] relative w-full overflow-hidden">
+          <CentralCanvas
+            chart={chart}
+            measures={measures}
+            currentTime={currentTime}
+            isPlaying={isPlaying}
+          />
+        </div>
 
         {/* Slide-over Drawers */}
         <LeftPanel
@@ -422,25 +424,25 @@ export default function App() {
             updateChartWithHistory({ ...chart, header: newHeader })
           }
         />
-      </main>
 
-      {/* 3. Bottom Timeline */}
-      <TimelineCanvas
-        chart={chart}
-        measures={measures}
-        currentTime={currentTime}
-        isPlaying={isPlaying}
-        onSeek={handleSeekTime}
-        selectedNoteType={selectedNoteType}
-        snap={snap}
-        zoom={zoom}
-        onAddNote={handleAddNote}
-        onDeleteNote={handleDeleteNote}
-        onMoveNote={handleMoveNote}
-        selectedNoteIds={selectedNoteIds}
-        onSelectNotes={setSelectedNoteIds}
-        audioPeaks={audioPeaks}
-      />
+        {/* Integrated Waveform & Note Timeline (Bottom Timeline Area) */}
+        <TimelineCanvas
+          chart={chart}
+          measures={measures}
+          currentTime={currentTime}
+          isPlaying={isPlaying}
+          onSeek={handleSeekTime}
+          selectedNoteType={selectedNoteType}
+          snap={snap}
+          zoom={zoom}
+          onAddNote={handleAddNote}
+          onDeleteNote={handleDeleteNote}
+          onMoveNote={handleMoveNote}
+          selectedNoteIds={selectedNoteIds}
+          onSelectNotes={setSelectedNoteIds}
+          audioPeaks={audioPeaks}
+        />
+      </main>
 
       {/* 4. Fixed Visual Note Selection Toolbar */}
       <Toolbar
