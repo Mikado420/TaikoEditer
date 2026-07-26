@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ChartEvent,
   MeasureInfo,
   Note,
   NoteType,
@@ -8,27 +7,23 @@ import {
   TaikoChart,
   ZoomValue,
 } from '../../types/chart';
-import {
-  measureAndPosToTime,
-  snapPosition,
-  timeToMeasureAndPos,
-} from '../../utils/timeMath';
+import { measureAndPosToTime, snapPosition, timeToMeasureAndPos } from '../../utils/timeMath';
 import { audioEngine } from '../../audio/audioEngine';
 
 interface TimelineCanvasProps {
   chart: TaikoChart;
   measures: MeasureInfo[];
   currentTime: number;
+  isPlaying: boolean;
+  onSeek: (time: number) => void;
+  selectedNoteType: NoteType;
   snap: SnapValue;
   zoom: ZoomValue;
-  selectedNoteType: NoteType;
-  activeTool: 'place' | 'select' | 'delete';
-  selectedNoteIds: string[];
-  onSelectNotes: (ids: string[]) => void;
   onAddNote: (note: Note) => void;
   onDeleteNote: (id: string) => void;
   onMoveNote: (id: string, newMeasure: number, newPos: number) => void;
-  onSeekTime: (seconds: number) => void;
+  selectedNoteIds: string[];
+  onSelectNotes: (ids: string[]) => void;
   audioPeaks: Float32Array | null;
 }
 
@@ -36,29 +31,44 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   chart,
   measures,
   currentTime,
+  isPlaying,
+  onSeek,
+  selectedNoteType,
   snap,
   zoom,
-  selectedNoteType,
-  activeTool,
-  selectedNoteIds,
-  onSelectNotes,
   onAddNote,
   onDeleteNote,
   onMoveNote,
-  onSeekTime,
+  selectedNoteIds,
+  onSelectNotes,
   audioPeaks,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
-  const [touchDistance, setTouchDistance] = useState<number | null>(null);
+  // Roll / Balloon multi-tap creation state
+  const [rollStartPoint, setRollStartPoint] = useState<{
+    measureIndex: number;
+    positionInMeasure: number;
+    timeSeconds: number;
+  } | null>(null);
 
-  // Horizontal scale: pixels per measure
-  // Zoom 1.0 = 200px per measure
-  const pxPerMeasure = 200 * zoom;
+  // Dragging note length or position
+  const [dragInfo, setDragInfo] = useState<{
+    noteId: string;
+    mode: 'move' | 'resize';
+  } | null>(null);
 
-  // Render loop
+  // Base layout pixels
+  const basePxPerMeasure = 220;
+  const pxPerMeasure = basePxPerMeasure * zoom;
+
+  // Clear rollStartPoint if note type changes
+  useEffect(() => {
+    setRollStartPoint(null);
+  }, [selectedNoteType]);
+
+  // Main Render Loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -73,95 +83,81 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
       ctx.clearRect(0, 0, width, height);
 
-      // Track layout heights inside timeline
-      const headerH = 22;
-      const waveformH = 26;
-      const eventsH = 20;
-      const notesLaneY = headerH + waveformH + eventsH + 28;
-      const notesLaneH = 40;
-
-      // 1. Draw Track Divider Lines & Backgrounds
-      ctx.fillStyle = '#181818';
-      ctx.fillRect(0, 0, width, height);
-
-      // Header bg
-      ctx.fillStyle = '#202020';
-      ctx.fillRect(0, 0, width, headerH);
-
-      // Waveform bg
-      ctx.fillStyle = '#141414';
-      ctx.fillRect(0, headerH, width, waveformH);
-
-      // Notes Lane bg
-      ctx.fillStyle = '#1C1C1C';
-      ctx.fillRect(0, headerH + waveformH + eventsH, width, notesLaneH + 16);
-
-      // Track horizontal line dividers
-      ctx.strokeStyle = '#3A3A3A';
-      ctx.lineWidth = 1;
-
-      ctx.beginPath();
-      ctx.moveTo(0, headerH);
-      ctx.lineTo(width, headerH);
-      ctx.moveTo(0, headerH + waveformH);
-      ctx.lineTo(width, headerH + waveformH);
-      ctx.moveTo(0, headerH + waveformH + eventsH);
-      ctx.lineTo(width, headerH + waveformH + eventsH);
-      ctx.moveTo(0, headerH + waveformH + eventsH + notesLaneH + 16);
-      ctx.lineTo(width, headerH + waveformH + eventsH + notesLaneH + 16);
-      ctx.stroke();
-
-      // Scroll Offset: Scroll horizontally to keep playhead visible or centered
+      // Scroll position tracking playhead
       const playheadM = timeToMeasureAndPos(currentTime, measures);
+      const scrollX = Math.max(
+        0,
+        (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure - width * 0.25
+      );
       const playheadX =
-        (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure;
-
-      // Center playhead around 20% from left
-      const scrollX = Math.max(0, playheadX - width * 0.2);
+        (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure - scrollX;
 
       ctx.save();
       ctx.translate(-scrollX, 0);
 
-      // 2. Draw Waveform Peaks
-      if (audioPeaks && audioPeaks.length > 0) {
-        ctx.fillStyle = 'rgba(0, 210, 255, 0.25)';
-        const totalDuration = measures.length * (measures[0]?.durationSeconds || 2);
-        const peakWidth = (totalDuration * (pxPerMeasure / (measures[0]?.durationSeconds || 2))) / audioPeaks.length;
+      // Track Lanes Dimensions
+      const headerH = 22;
+      const waveformH = 34;
+      const eventsH = 20;
+      const notesLaneY = headerH + waveformH + eventsH + 24;
 
-        for (let i = 0; i < audioPeaks.length; i++) {
-          const val = audioPeaks[i];
-          const x = i * peakWidth;
-          if (x >= scrollX - 50 && x <= scrollX + width + 50) {
-            const h = val * (waveformH - 4);
-            ctx.fillRect(x, headerH + waveformH / 2 - h / 2, Math.max(1, peakWidth - 0.5), h);
+      // 1. Canvas Background
+      ctx.fillStyle = '#161616';
+      ctx.fillRect(scrollX, 0, width, height);
+
+      // Lane dividers
+      ctx.fillStyle = '#222222';
+      ctx.fillRect(scrollX, headerH, width, waveformH);
+      ctx.fillRect(scrollX, headerH + waveformH + eventsH, width, height);
+
+      ctx.fillStyle = '#333333';
+      ctx.fillRect(scrollX, headerH + waveformH, width, 1);
+      ctx.fillRect(scrollX, headerH + waveformH + eventsH, width, 1);
+
+      // 2. Waveform Background
+      if (audioPeaks && audioPeaks.length > 0) {
+        ctx.fillStyle = 'rgba(0, 204, 255, 0.25)';
+        const totalDuration = measures[measures.length - 1]?.timeSeconds || 120;
+        const step = 2;
+
+        for (let px = Math.floor(scrollX); px < scrollX + width; px += step) {
+          const mRatio = px / pxPerMeasure;
+          const mIdx = Math.floor(mRatio);
+          const posRatio = mRatio - mIdx;
+          const t = measureAndPosToTime(mIdx, posRatio, measures);
+
+          if (t >= 0 && t <= totalDuration) {
+            const peakIdx = Math.floor((t / totalDuration) * audioPeaks.length);
+            const peakVal = audioPeaks[peakIdx] || 0;
+            const h = peakVal * waveformH * 0.8;
+            ctx.fillRect(px, headerH + (waveformH - h) / 2, step, Math.max(1, h));
           }
         }
       }
 
-      // 3. Draw Measures & Subdivisions Ticks
-      for (let m = 0; m < measures.length; m++) {
-        const mInfo = measures[m];
+      // 3. Grid Lines & Measures
+      const startM = Math.max(0, Math.floor(scrollX / pxPerMeasure));
+      const endM = Math.min(measures.length, Math.ceil((scrollX + width) / pxPerMeasure) + 1);
+
+      for (let m = startM; m < endM; m++) {
         const mX = m * pxPerMeasure;
 
-        if (mX >= scrollX - pxPerMeasure && mX <= scrollX + width + pxPerMeasure) {
-          // Measure Bar Line
-          ctx.strokeStyle = mInfo.barlineVisible ? '#555555' : '#333333';
+        if (mX >= scrollX - 50 && mX <= scrollX + width + 50) {
+          // Major Measure Barline
+          ctx.strokeStyle = '#4A4A4A';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.moveTo(mX, 0);
           ctx.lineTo(mX, height);
           ctx.stroke();
 
-          // Measure Number Text
-          ctx.fillStyle = '#AAAAAA';
+          // Measure Number Header
+          ctx.fillStyle = '#888888';
           ctx.font = 'bold 10px sans-serif';
           ctx.fillText(`M${m + 1}`, mX + 4, 14);
 
-          // Subdivision Grid Ticks based on Snap
+          // Grid ticks according to Snap
           const ticksCount = Math.max(4, snap);
-          ctx.strokeStyle = '#2D2D2D';
-          ctx.lineWidth = 1;
-
           for (let t = 1; t < ticksCount; t++) {
             const tickX = mX + (t / ticksCount) * pxPerMeasure;
             const isQuarter = t % (ticksCount / 4) === 0;
@@ -169,55 +165,63 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             ctx.beginPath();
             ctx.moveTo(tickX, isQuarter ? headerH : headerH + waveformH + eventsH);
             ctx.lineTo(tickX, height);
-            ctx.strokeStyle = isQuarter ? '#3D3D3D' : '#262626';
+            ctx.strokeStyle = isQuarter ? '#333333' : '#222222';
+            ctx.lineWidth = 1;
             ctx.stroke();
           }
         }
       }
 
-      // 4. Draw Events Markers Track
+      // 4. Draw Events Track
       for (const ev of chart.events) {
         const evX = (ev.measureIndex + ev.positionInMeasure) * pxPerMeasure;
         if (evX >= scrollX - 50 && evX <= scrollX + width + 50) {
-          const evY = headerH + waveformH + 12;
+          const evY = headerH + waveformH + 10;
 
           ctx.beginPath();
-          ctx.arc(evX, evY, 5, 0, Math.PI * 2);
-
-          switch (ev.type) {
-            case 'BPMCHANGE':
-              ctx.fillStyle = '#FFB000';
-              break;
-            case 'SCROLL':
-              ctx.fillStyle = '#00B2FF';
-              break;
-            case 'MEASURE':
-              ctx.fillStyle = '#10B981';
-              break;
-            case 'GOGOSTART':
-            case 'GOGOEND':
-              ctx.fillStyle = '#F43F5E';
-              break;
-            default:
-              ctx.fillStyle = '#A855F7';
-          }
+          ctx.arc(evX, evY, 4, 0, Math.PI * 2);
+          ctx.fillStyle =
+            ev.type === 'BPMCHANGE'
+              ? '#FFB000'
+              : ev.type === 'SCROLL'
+              ? '#00B2FF'
+              : ev.type === 'MEASURE'
+              ? '#10B981'
+              : ev.type === 'GOGOSTART' || ev.type === 'GOGOEND'
+              ? '#F43F5E'
+              : '#A855F7';
           ctx.fill();
 
-          // Label
-          ctx.fillStyle = '#CCCCCC';
+          ctx.fillStyle = '#BBBBBB';
           ctx.font = '9px sans-serif';
-          const label = ev.value ? `${ev.type}:${ev.value}` : ev.type;
-          ctx.fillText(label, evX + 7, evY + 3);
+          ctx.fillText(ev.value ? `${ev.type}:${ev.value}` : ev.type, evX + 6, evY + 3);
         }
       }
 
-      // 5. Draw Notes Track
+      // 5. Draw Active Pending Roll Start Point Preview
+      if (rollStartPoint) {
+        const startX = (rollStartPoint.measureIndex + rollStartPoint.positionInMeasure) * pxPerMeasure;
+        ctx.strokeStyle = '#FFCC00';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(startX, headerH + waveformH + eventsH);
+        ctx.lineTo(startX, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#FFCC00';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText('連打開始点', startX + 4, notesLaneY - 18);
+      }
+
+      // 6. Draw Chart Notes
       for (const note of chart.notes) {
         if (note.type === 0) continue;
 
         const noteX = (note.measureIndex + note.positionInMeasure) * pxPerMeasure;
 
-        if (noteX >= scrollX - 50 && noteX <= scrollX + width + 50) {
+        if (noteX >= scrollX - 100 && noteX <= scrollX + width + 100) {
           const isSelected = selectedNoteIds.includes(note.id);
           const r = note.type === 3 || note.type === 4 || note.type === 6 ? 12 : 9;
 
@@ -228,10 +232,19 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
             const endX = (endM.measureIndex + endM.positionInMeasure) * pxPerMeasure;
 
             ctx.fillStyle = note.type === 7 ? 'rgba(255, 136, 0, 0.7)' : 'rgba(255, 204, 0, 0.7)';
-            ctx.fillRect(noteX, notesLaneY - r / 2, Math.max(5, endX - noteX), r);
+            ctx.fillRect(noteX, notesLaneY - r / 2, Math.max(8, endX - noteX), r);
+
+            // Resize handle knob on end of roll
+            ctx.beginPath();
+            ctx.arc(endX, notesLaneY, r * 0.8, 0, Math.PI * 2);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fill();
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 1;
+            ctx.stroke();
           }
 
-          // Draw circle note
+          // Draw note head
           ctx.beginPath();
           ctx.arc(noteX, notesLaneY, r, 0, Math.PI * 2);
 
@@ -257,11 +270,10 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           ctx.fill();
 
           ctx.strokeStyle = isSelected ? '#FFFFFF' : '#000000';
-          ctx.lineWidth = isSelected ? 3 : 1.5;
+          ctx.lineWidth = isSelected ? 2.5 : 1.5;
           ctx.stroke();
 
           if (isSelected) {
-            // Halo glow for selected note
             ctx.beginPath();
             ctx.arc(noteX, notesLaneY, r + 4, 0, Math.PI * 2);
             ctx.strokeStyle = '#FF5A36';
@@ -271,7 +283,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         }
       }
 
-      // 6. Draw Playhead Needle
+      // 7. Draw Playhead Needle
       ctx.strokeStyle = '#FF5A36';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -279,7 +291,6 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.lineTo(playheadX, height);
       ctx.stroke();
 
-      // Top triangle cap on needle
       ctx.fillStyle = '#FF5A36';
       ctx.beginPath();
       ctx.moveTo(playheadX - 6, 0);
@@ -318,101 +329,126 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     selectedNoteIds,
     pxPerMeasure,
     audioPeaks,
+    rollStartPoint,
   ]);
 
-  // Click & Touch Handlers on Canvas
+  // Pointer Click / Tap Handler (Unified Tap to Add or Delete)
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
 
-    // Convert pixel click to measure index and position
     const playheadM = timeToMeasureAndPos(currentTime, measures);
-    const scrollX = Math.max(0, (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure - rect.width * 0.2);
+    const scrollX = Math.max(
+      0,
+      (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure - rect.width * 0.25
+    );
 
     const targetX = clickX + scrollX;
     const exactMeasure = targetX / pxPerMeasure;
-    const measureIndex = Math.floor(exactMeasure);
+    const measureIndex = Math.max(0, Math.floor(exactMeasure));
     const rawPos = exactMeasure - measureIndex;
     const snappedPos = snapPosition(rawPos, snap);
 
     const timeSeconds = measureAndPosToTime(measureIndex, snappedPos, measures);
 
-    // 1. Check if clicking an existing note
-    const clickedNote = chart.notes.find((n) => {
+    // Rule 1: Check if tapping an existing note -> Delete Note instantly!
+    const existingNote = chart.notes.find((n) => {
       if (n.type === 0) return false;
       const nX = (n.measureIndex + n.positionInMeasure) * pxPerMeasure;
       return Math.abs(nX - targetX) < 18;
     });
 
-    if (clickedNote) {
-      if (activeTool === 'delete') {
-        onDeleteNote(clickedNote.id);
-        return;
-      }
-
-      onSelectNotes([clickedNote.id]);
-      audioEngine.playHitSound(clickedNote.type);
-      setDraggedNoteId(clickedNote.id);
+    if (existingNote) {
+      audioEngine.playHitSound(existingNote.type);
+      onDeleteNote(existingNote.id);
+      setRollStartPoint(null);
       return;
     }
 
-    // 2. If clicking header or empty spot with Place tool -> Add Note or Seek
-    if (activeTool === 'place' && selectedNoteType !== 0) {
-      const newNote: Note = {
-        id: `note_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        type: selectedNoteType,
-        measureIndex,
-        positionInMeasure: snappedPos,
-        timeSeconds,
-        durationSeconds: selectedNoteType === 5 || selectedNoteType === 6 || selectedNoteType === 7 ? 0.5 : undefined,
-      };
+    // Rule 2: If selecting Roll (5), Big Roll (6), or Balloon (7)
+    if (selectedNoteType === 5 || selectedNoteType === 6 || selectedNoteType === 7) {
+      if (!rollStartPoint) {
+        // Step 1: Set Start Point
+        setRollStartPoint({
+          measureIndex,
+          positionInMeasure: snappedPos,
+          timeSeconds,
+        });
+        audioEngine.playHitSound(selectedNoteType);
+        return;
+      } else {
+        // Step 2: Set End Point and create long roll note
+        const startTime = rollStartPoint.timeSeconds;
+        const endTime = timeSeconds;
 
-      onAddNote(newNote);
-      audioEngine.playHitSound(selectedNoteType);
-    } else {
-      // Seek playhead time
-      onSeekTime(timeSeconds);
+        let finalStartM = rollStartPoint.measureIndex;
+        let finalStartPos = rollStartPoint.positionInMeasure;
+        let finalStartTime = startTime;
+        let duration = Math.abs(endTime - startTime);
+
+        if (endTime < startTime) {
+          finalStartM = measureIndex;
+          finalStartPos = snappedPos;
+          finalStartTime = endTime;
+        }
+
+        if (duration < 0.1) duration = 0.4;
+
+        const newNote: Note = {
+          id: `note_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          type: selectedNoteType,
+          measureIndex: finalStartM,
+          positionInMeasure: finalStartPos,
+          timeSeconds: finalStartTime,
+          durationSeconds: duration,
+        };
+
+        onAddNote(newNote);
+        audioEngine.playHitSound(selectedNoteType);
+        setRollStartPoint(null);
+        return;
+      }
     }
-  };
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!draggedNoteId) return;
+    // Rule 3: Single-Tap Note Placement (Don, Ka, Don Big, Ka Big = 1, 2, 3, 4)
+    const newNote: Note = {
+      id: `note_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      type: selectedNoteType,
+      measureIndex,
+      positionInMeasure: snappedPos,
+      timeSeconds,
+    };
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-
-    const playheadM = timeToMeasureAndPos(currentTime, measures);
-    const scrollX = Math.max(0, (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure - rect.width * 0.2);
-
-    const targetX = clickX + scrollX;
-    const exactMeasure = Math.max(0, targetX / pxPerMeasure);
-    const measureIndex = Math.floor(exactMeasure);
-    const rawPos = exactMeasure - measureIndex;
-    const snappedPos = snapPosition(rawPos, snap);
-
-    onMoveNote(draggedNoteId, measureIndex, snappedPos);
-  };
-
-  const handlePointerUp = () => {
-    setDraggedNoteId(null);
+    onAddNote(newNote);
+    audioEngine.playHitSound(selectedNoteType);
+    onSeek(timeSeconds);
   };
 
   return (
     <div
       ref={containerRef}
-      className="h-[110px] sm:h-[150px] max-h-[30vh] bg-[#181818] border-t border-[#3A3A3A] relative select-none touch-none shrink-0"
+      className="h-[110px] sm:h-[150px] max-h-[30vh] bg-[#181818] border-t border-[#3A3A3A] relative select-none touch-none shrink-0 safe-pl safe-pr"
     >
       <canvas
         ref={canvasRef}
         onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        className="w-full h-full block cursor-crosshair"
+        className="w-full h-full cursor-crosshair block"
       />
+
+      {/* Guide Banner for Roll Start/End Selection */}
+      {rollStartPoint && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-amber-500 text-black px-3 py-1 rounded-full text-[11px] font-bold shadow-xl flex items-center gap-2 animate-bounce z-20">
+          <span>連打の終了位置をタップしてください</span>
+          <button
+            onClick={() => setRollStartPoint(null)}
+            className="px-1.5 py-0.2 bg-black/20 hover:bg-black/40 text-black rounded text-[10px]"
+          >
+            解除
+          </button>
+        </div>
+      )}
     </div>
   );
 };

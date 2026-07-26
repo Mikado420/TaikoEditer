@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ChartEvent,
-  ChartHeader,
   Note,
   NoteType,
   SnapValue,
@@ -9,13 +8,11 @@ import {
   ZoomValue,
 } from './types/chart';
 import { calculateMeasures } from './utils/timeMath';
-import { parseTja } from './parser/tjaParser';
 import { exportToTja } from './parser/tjaExporter';
 import { audioEngine } from './audio/audioEngine';
 import {
   deleteChartFromDb,
   getAllChartsFromDb,
-  loadChartFromDb,
   saveChartToDb,
 } from './storage/db';
 import { initAutoSave, triggerSave } from './storage/autoSave';
@@ -28,6 +25,7 @@ import { CentralCanvas } from './components/CentralCanvas';
 import { TimelineCanvas } from './components/Timeline/TimelineCanvas';
 import { Toolbar } from './components/Toolbar';
 import { StatusBar } from './components/StatusBar';
+import { PortraitGuard } from './components/PortraitGuard';
 
 import { ProjectModal } from './components/Modals/ProjectModal';
 import { EventEditModal } from './components/Modals/EventEditModal';
@@ -55,7 +53,6 @@ export default function App() {
 
   // Editor UI State
   const [selectedNoteType, setSelectedNoteType] = useState<NoteType>(1);
-  const [activeTool, setActiveTool] = useState<'place' | 'select' | 'delete'>('place');
   const [snap, setSnap] = useState<SnapValue>(16);
   const [zoom, setZoom] = useState<ZoomValue>(1.0);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
@@ -70,9 +67,9 @@ export default function App() {
   // Selection
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
 
-  // Layout Panels
-  const [leftPanelOpen, setLeftPanelOpen] = useState<boolean>(true);
-  const [rightPanelOpen, setRightPanelOpen] = useState<boolean>(true);
+  // Layout Drawers (Default CLOSED for maximum editing space)
+  const [leftPanelOpen, setLeftPanelOpen] = useState<boolean>(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState<boolean>(false);
 
   // AutoSave & PWA
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -98,7 +95,7 @@ export default function App() {
     setTutorialModalOpen(false);
   };
 
-  // Screen Wake Lock while editing/playing
+  // Screen Wake Lock
   useEffect(() => {
     let wakeLock: any = null;
     const requestWakeLock = async () => {
@@ -107,7 +104,7 @@ export default function App() {
           wakeLock = await (navigator as any).wakeLock.request('screen');
         }
       } catch (e) {
-        // Ignore if wakeLock fails or permission denied
+        // Ignore wake lock failure
       }
     };
     requestWakeLock();
@@ -139,7 +136,6 @@ export default function App() {
       }
     });
 
-    // PWA Install prompt listener
     const handleBeforeInstall = (e: Event) => {
       e.preventDefault();
       setPwaPrompt(e);
@@ -165,7 +161,7 @@ export default function App() {
     return unsub;
   }, []);
 
-  // Recalculate Measure Map whenever Chart Header or Events change
+  // Recalculate Measure Map
   const measures = useMemo(() => {
     return calculateMeasures(chart.header, chart.events, 64);
   }, [chart.header, chart.events]);
@@ -175,62 +171,32 @@ export default function App() {
     setChart(newChart);
     triggerSave(newChart);
 
-    // Slice redo history if we made a new action
     const newHistory = history.slice(0, historyIdx + 1);
     newHistory.push(newChart);
     if (newHistory.length > 100) newHistory.shift();
-
     setHistory(newHistory);
     setHistoryIdx(newHistory.length - 1);
   };
 
   const handleUndo = () => {
     if (historyIdx > 0) {
-      const prevIdx = historyIdx - 1;
-      setHistoryIdx(prevIdx);
-      setChart(history[prevIdx]);
+      const prev = history[historyIdx - 1];
+      setHistoryIdx(historyIdx - 1);
+      setChart(prev);
+      triggerSave(prev);
     }
   };
 
   const handleRedo = () => {
     if (historyIdx < history.length - 1) {
-      const nextIdx = historyIdx + 1;
-      setHistoryIdx(nextIdx);
-      setChart(history[nextIdx]);
+      const next = history[historyIdx + 1];
+      setHistoryIdx(historyIdx + 1);
+      setChart(next);
+      triggerSave(next);
     }
   };
 
-  // Keyboard Shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return; // ignore typing in inputs
-      }
-
-      if (e.code === 'Space') {
-        e.preventDefault();
-        togglePlay();
-      } else if (e.code === 'Delete' || e.code === 'Backspace') {
-        if (selectedNoteIds.length > 0) {
-          e.preventDefault();
-          const newNotes = chart.notes.filter((n) => !selectedNoteIds.includes(n.id));
-          updateChartWithHistory({ ...chart, notes: newNotes });
-          setSelectedNoteIds([]);
-        }
-      } else if (e.ctrlKey && e.code === 'KeyZ') {
-        e.preventDefault();
-        handleUndo();
-      } else if (e.ctrlKey && e.code === 'KeyY') {
-        e.preventDefault();
-        handleRedo();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, selectedNoteIds, chart, historyIdx, history]);
-
-  // Audio & Playback Handlers
+  // Playback Controls
   const togglePlay = () => {
     if (isPlaying) {
       audioEngine.pause();
@@ -242,38 +208,41 @@ export default function App() {
   };
 
   const handleStop = () => {
-    audioEngine.pause();
+    audioEngine.stop();
     setIsPlaying(false);
-    audioEngine.seek(0);
     setCurrentTime(0);
   };
 
-  const handleSeekTime = (seconds: number) => {
-    audioEngine.seek(seconds);
-    setCurrentTime(seconds);
+  const handleSeekTime = (t: number) => {
+    setCurrentTime(t);
+    if (isPlaying) {
+      audioEngine.play(t);
+    }
   };
 
   const handleSpeedChange = (speed: number) => {
     setPlaybackSpeed(speed);
-    audioEngine.setSpeed(speed);
+    audioEngine.setPlaybackRate(speed);
   };
 
-  // File Import / Export Handlers
+  // File Import Handlers
   const handleLoadAudio = async (file: File) => {
-    setAudioFileName(file.name);
-    const duration = await audioEngine.loadAudioFile(file);
-    setIsAudioLoaded(true);
-    setAudioPeaks(audioEngine.getPeaks());
-    // Update header wave name
-    updateChartWithHistory({
-      ...chart,
-      header: { ...chart.header, wave: file.name },
-    });
+    try {
+      await audioEngine.loadAudioFile(file);
+      setIsAudioLoaded(true);
+      setAudioFileName(file.name);
+      const peaks = audioEngine.getWaveformPeaks(1000);
+      setAudioPeaks(peaks);
+      setToastMessage({ text: `音源「${file.name}」を読み込みました！`, isError: false });
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (e: any) {
+      setToastMessage({ text: `音源読込エラー: ${e.message}`, isError: true });
+      setTimeout(() => setToastMessage(null), 4000);
+    }
   };
 
   const handleImportFile = async (file: File) => {
     const result = await processImportedFile(file);
-
     if (result.error) {
       setToastMessage({ text: result.error, isError: true });
       setTimeout(() => setToastMessage(null), 4000);
@@ -335,7 +304,6 @@ export default function App() {
 
   // Note Edits
   const handleAddNote = (newNote: Note) => {
-    // Remove existing note at same position if any
     const filteredNotes = chart.notes.filter(
       (n) =>
         !(
@@ -370,10 +338,10 @@ export default function App() {
   };
 
   // Event Edits
-  const handleAddEvent = (ev: ChartEvent) => {
+  const handleAddEvent = (newEv: ChartEvent) => {
     updateChartWithHistory({
       ...chart,
-      events: [...chart.events, ev],
+      events: [...chart.events, newEv],
     });
   };
 
@@ -400,9 +368,12 @@ export default function App() {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className="w-full h-[100dvh] max-h-[100dvh] bg-[#1B1B1B] text-white flex flex-col overflow-hidden select-none touch-none relative overscroll-none"
+      className="w-full h-[100dvh] max-h-[100dvh] bg-[#141414] text-white flex flex-col overflow-hidden select-none touch-none relative overscroll-none"
     >
-      {/* 1. Top Header */}
+      {/* Landscape Orientation Enforcement Guard */}
+      <PortraitGuard />
+
+      {/* 1. Top Compact Header */}
       <Header
         chart={chart}
         isPlaying={isPlaying}
@@ -417,19 +388,15 @@ export default function App() {
         audioFileName={audioFileName}
         pwaPrompt={pwaPrompt}
         onInstallPwa={handleInstallPwa}
+        leftPanelOpen={leftPanelOpen}
+        onToggleLeftPanel={() => setLeftPanelOpen(!leftPanelOpen)}
+        rightPanelOpen={rightPanelOpen}
+        onToggleRightPanel={() => setRightPanelOpen(!rightPanelOpen)}
       />
 
-      {/* 2. Main Workstation Area (Left Panel | Central Preview | Right Panel) */}
-      <main className="flex-1 flex overflow-hidden relative">
-        <LeftPanel
-          isOpen={leftPanelOpen}
-          onToggleOpen={() => setLeftPanelOpen(!leftPanelOpen)}
-          events={chart.events}
-          onJumpToEvent={handleJumpToEvent}
-          onAddEventClick={() => setEventModalOpen(true)}
-          onDeleteEvent={handleDeleteEvent}
-        />
-
+      {/* 2. Main Center Workstation Area (>70% space) */}
+      <main className="flex-1 flex overflow-hidden relative w-full h-full">
+        {/* Central Taiko Lane Real-time Preview */}
         <CentralCanvas
           chart={chart}
           measures={measures}
@@ -437,9 +404,19 @@ export default function App() {
           isPlaying={isPlaying}
         />
 
+        {/* Slide-over Drawers */}
+        <LeftPanel
+          isOpen={leftPanelOpen}
+          onClose={() => setLeftPanelOpen(false)}
+          events={chart.events}
+          onJumpToEvent={handleJumpToEvent}
+          onAddEventClick={() => setEventModalOpen(true)}
+          onDeleteEvent={handleDeleteEvent}
+        />
+
         <RightPanel
           isOpen={rightPanelOpen}
-          onToggleOpen={() => setRightPanelOpen(!rightPanelOpen)}
+          onClose={() => setRightPanelOpen(false)}
           header={chart.header}
           onChangeHeader={(newHeader) =>
             updateChartWithHistory({ ...chart, header: newHeader })
@@ -447,30 +424,28 @@ export default function App() {
         />
       </main>
 
-      {/* 3. Bottom Timeline (35% height) */}
+      {/* 3. Bottom Timeline */}
       <TimelineCanvas
         chart={chart}
         measures={measures}
         currentTime={currentTime}
+        isPlaying={isPlaying}
+        onSeek={handleSeekTime}
+        selectedNoteType={selectedNoteType}
         snap={snap}
         zoom={zoom}
-        selectedNoteType={selectedNoteType}
-        activeTool={activeTool}
-        selectedNoteIds={selectedNoteIds}
-        onSelectNotes={setSelectedNoteIds}
         onAddNote={handleAddNote}
         onDeleteNote={handleDeleteNote}
         onMoveNote={handleMoveNote}
-        onSeekTime={handleSeekTime}
+        selectedNoteIds={selectedNoteIds}
+        onSelectNotes={setSelectedNoteIds}
         audioPeaks={audioPeaks}
       />
 
-      {/* 4. Edit Toolbar (10% height) */}
+      {/* 4. Fixed Visual Note Selection Toolbar */}
       <Toolbar
         selectedNoteType={selectedNoteType}
         onSelectNoteType={setSelectedNoteType}
-        activeTool={activeTool}
-        onSelectTool={setActiveTool}
         canUndo={historyIdx > 0}
         canRedo={historyIdx < history.length - 1}
         onUndo={handleUndo}
@@ -483,9 +458,11 @@ export default function App() {
         onChangeZoom={setZoom}
         playbackSpeed={playbackSpeed}
         onChangeSpeed={handleSpeedChange}
+        onOpenLeftDrawer={() => setLeftPanelOpen(true)}
+        onOpenRightDrawer={() => setRightPanelOpen(true)}
       />
 
-      {/* 5. Status Bar */}
+      {/* 5. Minimal Status Bar */}
       <StatusBar
         currentTime={currentTime}
         measures={measures}
@@ -554,16 +531,16 @@ export default function App() {
       {/* Toast Notification */}
       {toastMessage && (
         <div
-          className={`fixed bottom-10 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl shadow-2xl border flex items-center gap-2.5 text-xs font-bold animate-bounce ${
+          className={`fixed bottom-12 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl shadow-2xl border flex items-center gap-2 text-xs font-bold animate-bounce ${
             toastMessage.isError
               ? 'bg-rose-900/90 border-rose-500 text-rose-100'
               : 'bg-emerald-900/90 border-emerald-500 text-emerald-100'
           }`}
         >
           {toastMessage.isError ? (
-            <AlertTriangle size={18} className="text-rose-300 shrink-0" />
+            <AlertTriangle size={16} className="text-rose-300 shrink-0" />
           ) : (
-            <CheckCircle size={18} className="text-emerald-300 shrink-0" />
+            <CheckCircle size={16} className="text-emerald-300 shrink-0" />
           )}
           <span>{toastMessage.text}</span>
         </div>

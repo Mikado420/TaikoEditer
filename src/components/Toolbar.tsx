@@ -1,22 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Undo,
   Redo,
   Play,
   Pause,
-  Trash2,
-  ZoomIn,
   Grid,
+  ZoomIn,
   FastForward,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { NoteType, SnapValue, ZoomValue } from '../types/chart';
 import { audioEngine } from '../audio/audioEngine';
+import { NoteIcon } from './NoteIcon';
 
 interface ToolbarProps {
   selectedNoteType: NoteType;
   onSelectNoteType: (type: NoteType) => void;
-  activeTool: 'place' | 'select' | 'delete';
-  onSelectTool: (tool: 'place' | 'select' | 'delete') => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -29,13 +28,13 @@ interface ToolbarProps {
   onChangeZoom: (zoom: ZoomValue) => void;
   playbackSpeed: number;
   onChangeSpeed: (speed: number) => void;
+  onOpenLeftDrawer?: () => void;
+  onOpenRightDrawer?: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
   selectedNoteType,
   onSelectNoteType,
-  activeTool,
-  onSelectTool,
   canUndo,
   canRedo,
   onUndo,
@@ -47,153 +46,186 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   zoom,
   onChangeZoom,
   playbackSpeed,
-  onChangeSpeed, }) => {
-  const noteButtons: { type: NoteType; label: string; color: string; border: string }[] = [
-    { type: 1, label: 'ドン', color: 'bg-[#FF3B30]', border: 'border-[#FF3B30]' },
-    { type: 2, label: 'カッ', color: 'bg-[#00A2FF]', border: 'border-[#00A2FF]' },
-    { type: 3, label: '大ドン', color: 'bg-[#FF3B30]', border: 'border-[#FF3B30]' },
-    { type: 4, label: '大カッ', color: 'bg-[#00A2FF]', border: 'border-[#00A2FF]' },
-    { type: 5, label: '連打', color: 'bg-[#FFCC00]', border: 'border-[#FFCC00]' },
-    { type: 6, label: '大連打', color: 'bg-[#FFCC00]', border: 'border-[#FFCC00]' },
-    { type: 7, label: '風船', color: 'bg-[#FF8800]', border: 'border-[#FF8800]' },
+  onChangeSpeed,
+  onOpenLeftDrawer,
+  onOpenRightDrawer,
+}) => {
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+  const [showSettingsPopover, setShowSettingsPopover] = useState<boolean>(false);
+
+  const notesList: { type: NoteType; name: string }[] = [
+    { type: 1, name: 'ドン' },
+    { type: 2, name: 'カッ' },
+    { type: 3, name: '大ドン' },
+    { type: 4, name: '大カッ' },
+    { type: 5, name: '連打' },
+    { type: 6, name: '大連打' },
+    { type: 7, name: '風船' },
   ];
 
   const handleNoteClick = (type: NoteType) => {
     onSelectNoteType(type);
-    onSelectTool('place');
     audioEngine.playHitSound(type);
   };
 
+  const handleTouchStart = (name: string) => {
+    setActiveTooltip(name);
+  };
+
+  const handleTouchEnd = () => {
+    setTimeout(() => setActiveTooltip(null), 1200);
+  };
+
   return (
-    <div className="h-12 bg-[#141414] border-t border-[#3A3A3A] px-2 flex items-center justify-between gap-1.5 shrink-0 select-none overflow-x-auto text-xs custom-scrollbar safe-pl safe-pr">
-      {/* Note Type Buttons */}
-      <div className="flex items-center gap-1 shrink-0">
-        {noteButtons.map((btn) => {
-          const isActive = activeTool === 'place' && selectedNoteType === btn.type;
-          return (
-            <button
-              key={btn.type}
-              onClick={() => handleNoteClick(btn.type)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-full border transition active:scale-95 ${
-                isActive
-                  ? 'bg-[#2A2A2A] text-white ring-2 ring-[#FF5A36] font-bold'
-                  : 'bg-[#202020] hover:bg-[#2A2A2A] text-gray-300 border-[#333333]'
-              }`}
-            >
-              <div
-                className={`w-3.5 h-3.5 rounded-full ${btn.color} shrink-0 shadow-sm`}
-              />
-              <span className="text-[11px] font-semibold whitespace-nowrap">
-                {btn.label}
-              </span>
-            </button>
-          );
-        })}
+    <div className="h-14 bg-[#141414]/95 backdrop-blur-md border-t border-[#333333] px-2 flex items-center justify-between gap-2 shrink-0 select-none safe-pb safe-pl safe-pr relative z-30">
+      {/* Tooltip Overlay */}
+      {activeTooltip && (
+        <div className="absolute -top-9 left-1/2 -translate-x-1/2 bg-[#282828] text-amber-400 border border-amber-500/40 px-3 py-1 rounded-full text-[11px] font-bold shadow-lg animate-fade-in pointer-events-none">
+          {activeTooltip}
+        </div>
+      )}
 
-        {/* Delete Tool */}
-        <button
-          onClick={() => onSelectTool('delete')}
-          className={`flex items-center gap-1 px-2 py-1 rounded-full border transition active:scale-95 ${
-            activeTool === 'delete'
-              ? 'bg-rose-950/80 text-rose-300 border-rose-600 ring-2 ring-rose-500 font-bold'
-              : 'bg-[#202020] hover:bg-[#2A2A2A] text-gray-400 border-[#333333]'
-          }`}
-        >
-          <Trash2 size={13} className="text-rose-400" />
-          <span className="text-[11px] font-semibold">削除</span>
-        </button>
-      </div>
-
-      {/* Middle: Undo / Redo / Play */}
+      {/* Left: Quick Undo / Redo */}
       <div className="flex items-center gap-1 shrink-0">
         <button
           onClick={onUndo}
           disabled={!canUndo}
-          className={`p-1.5 rounded bg-[#202020] transition active:scale-95 ${
-            canUndo
-              ? 'hover:bg-[#2A2A2A] text-gray-200'
-              : 'text-gray-600 cursor-not-allowed'
+          className={`p-2 rounded-xl bg-[#222222] border border-[#333333] transition active:scale-95 ${
+            canUndo ? 'hover:bg-[#2A2A2A] text-gray-200' : 'text-gray-600 border-transparent cursor-not-allowed'
           }`}
-          title="元に戻す (Ctrl+Z)"
+          title="元に戻す"
         >
-          <Undo size={14} />
+          <Undo size={16} />
         </button>
-
         <button
           onClick={onRedo}
           disabled={!canRedo}
-          className={`p-1.5 rounded bg-[#202020] transition active:scale-95 ${
-            canRedo
-              ? 'hover:bg-[#2A2A2A] text-gray-200'
-              : 'text-gray-600 cursor-not-allowed'
+          className={`p-2 rounded-xl bg-[#222222] border border-[#333333] transition active:scale-95 ${
+            canRedo ? 'hover:bg-[#2A2A2A] text-gray-200' : 'text-gray-600 border-transparent cursor-not-allowed'
           }`}
-          title="やり直し (Ctrl+Y)"
+          title="やり直し"
         >
-          <Redo size={14} />
-        </button>
-
-        <button
-          onClick={onTogglePlay}
-          className={`p-1.5 rounded font-bold text-white transition active:scale-95 ${
-            isPlaying ? 'bg-amber-600' : 'bg-[#FF5A36]'
-          }`}
-          title="再生/一時停止 (Space)"
-        >
-          {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+          <Redo size={16} />
         </button>
       </div>
 
-      {/* Right Controls: Snap / Zoom / Speed Selectors */}
-      <div className="flex items-center gap-1.5 shrink-0 text-[11px]">
-        {/* Snap */}
-        <div className="flex items-center gap-1 bg-[#202020] border border-[#333333] px-1.5 py-0.5 rounded">
-          <Grid size={12} className="text-amber-400 shrink-0" />
-          <span className="text-gray-400 hidden sm:inline">Snap:</span>
-          <select
-            value={snap}
-            onChange={(e) => onChangeSnap(parseInt(e.target.value, 10))}
-            className="bg-transparent text-gray-200 focus:outline-none font-semibold cursor-pointer"
-          >
-            {[1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64].map((s) => (
-              <option key={s} value={s} className="bg-[#202020]">
-                1/{s}分
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* Center: Note Selection Icons (Visual ONLY - No Text Labels unless Long Pressed) */}
+      <div className="flex items-center justify-center gap-1.5 sm:gap-2.5 overflow-x-auto custom-scrollbar px-1 py-1">
+        {notesList.map((item) => {
+          const isSelected = selectedNoteType === item.type;
+          return (
+            <button
+              key={item.type}
+              onClick={() => handleNoteClick(item.type)}
+              onTouchStart={() => handleTouchStart(item.name)}
+              onTouchEnd={handleTouchEnd}
+              onMouseEnter={() => setActiveTooltip(item.name)}
+              onMouseLeave={() => setActiveTooltip(null)}
+              className={`p-1.5 rounded-2xl transition-all duration-150 flex items-center justify-center shrink-0 active:scale-90 relative ${
+                isSelected
+                  ? 'bg-[#333333] ring-2 ring-[#FF5A36] shadow-lg scale-110 -translate-y-0.5'
+                  : 'bg-[#202020] hover:bg-[#2A2A2A] opacity-80 hover:opacity-100'
+              }`}
+            >
+              <NoteIcon type={item.type} size={28} />
+            </button>
+          );
+        })}
+      </div>
 
-        {/* Zoom */}
-        <div className="flex items-center gap-1 bg-[#202020] border border-[#333333] px-1.5 py-0.5 rounded">
-          <ZoomIn size={12} className="text-sky-400 shrink-0" />
-          <span className="text-gray-400 hidden sm:inline">Zoom:</span>
-          <select
-            value={zoom}
-            onChange={(e) => onChangeZoom(parseFloat(e.target.value) as ZoomValue)}
-            className="bg-transparent text-gray-200 focus:outline-none font-semibold cursor-pointer"
-          >
-            {[0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0, 8.0].map((z) => (
-              <option key={z} value={z} className="bg-[#202020]">
-                {(z * 100).toFixed(0)}%
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* Right: Play / Settings Popover */}
+      <div className="flex items-center gap-1 shrink-0">
+        {/* Play / Pause */}
+        <button
+          onClick={onTogglePlay}
+          className={`p-2 rounded-xl font-bold text-white transition active:scale-95 flex items-center justify-center ${
+            isPlaying ? 'bg-amber-600' : 'bg-[#FF5A36] hover:bg-[#FF451A]'
+          }`}
+          title={isPlaying ? '一時停止' : '再生'}
+        >
+          {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
+        </button>
 
-        {/* Speed */}
-        <div className="flex items-center gap-1 bg-[#202020] border border-[#333333] px-1.5 py-0.5 rounded">
-          <FastForward size={12} className="text-emerald-400 shrink-0" />
-          <span className="text-gray-400 hidden sm:inline">速度:</span>
-          <select
-            value={playbackSpeed}
-            onChange={(e) => onChangeSpeed(parseFloat(e.target.value))}
-            className="bg-transparent text-gray-200 focus:outline-none font-semibold cursor-pointer"
+        {/* Snap/Zoom/Speed Settings Toggle */}
+        <div className="relative">
+          <button
+            onClick={() => setShowSettingsPopover(!showSettingsPopover)}
+            className={`p-2 rounded-xl bg-[#222222] border transition active:scale-95 ${
+              showSettingsPopover
+                ? 'bg-[#333333] border-[#FF5A36] text-[#FF5A36]'
+                : 'border-[#333333] text-gray-300 hover:bg-[#2A2A2A]'
+            }`}
+            title="グリッド・ズーム設定"
           >
-            {[0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((sp) => (
-              <option key={sp} value={sp} className="bg-[#202020]">
-                {sp}x
-              </option>
-            ))}
-          </select>
+            <SlidersHorizontal size={16} />
+          </button>
+
+          {/* Popover Card */}
+          {showSettingsPopover && (
+            <div className="absolute bottom-12 right-0 bg-[#1E1E1E] border border-[#3A3A3A] p-3 rounded-2xl shadow-2xl w-52 flex flex-col gap-2.5 text-xs z-50 animate-fade-in">
+              <div className="flex items-center justify-between border-b border-[#2C2C2C] pb-1.5 font-bold text-gray-300">
+                <span>グリッド & 表示設定</span>
+                <span className="text-[10px] text-gray-500">Tap outside to close</span>
+              </div>
+
+              {/* Snap */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-gray-300">
+                  <Grid size={14} className="text-amber-400" />
+                  <span>スナップ:</span>
+                </div>
+                <select
+                  value={snap}
+                  onChange={(e) => onChangeSnap(parseInt(e.target.value, 10))}
+                  className="bg-[#2B2B2B] border border-[#3A3A3A] rounded px-2 py-0.5 text-gray-200 focus:outline-none font-semibold text-xs cursor-pointer"
+                >
+                  {[1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64].map((s) => (
+                    <option key={s} value={s}>
+                      1/{s}分
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Zoom */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-gray-300">
+                  <ZoomIn size={14} className="text-sky-400" />
+                  <span>ズーム:</span>
+                </div>
+                <select
+                  value={zoom}
+                  onChange={(e) => onChangeZoom(parseFloat(e.target.value) as ZoomValue)}
+                  className="bg-[#2B2B2B] border border-[#3A3A3A] rounded px-2 py-0.5 text-gray-200 focus:outline-none font-semibold text-xs cursor-pointer"
+                >
+                  {[0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0, 8.0].map((z) => (
+                    <option key={z} value={z}>
+                      {(z * 100).toFixed(0)}%
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Playback Speed */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-gray-300">
+                  <FastForward size={14} className="text-emerald-400" />
+                  <span>再生速度:</span>
+                </div>
+                <select
+                  value={playbackSpeed}
+                  onChange={(e) => onChangeSpeed(parseFloat(e.target.value))}
+                  className="bg-[#2B2B2B] border border-[#3A3A3A] rounded px-2 py-0.5 text-gray-200 focus:outline-none font-semibold text-xs cursor-pointer"
+                >
+                  {[0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((sp) => (
+                    <option key={sp} value={sp}>
+                      {sp}x
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
