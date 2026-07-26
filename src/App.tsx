@@ -21,8 +21,7 @@ import { createBlankChart, SAMPLE_CHARTS } from './utils/sampleCharts';
 import { Header } from './components/Header';
 import { LeftPanel } from './components/LeftPanel';
 import { RightPanel } from './components/RightPanel';
-import { CentralCanvas } from './components/CentralCanvas';
-import { TimelineCanvas } from './components/Timeline/TimelineCanvas';
+import { UnifiedEditorCanvas } from './components/UnifiedEditorCanvas';
 import { Toolbar } from './components/Toolbar';
 import { StatusBar } from './components/StatusBar';
 import { PortraitGuard } from './components/PortraitGuard';
@@ -394,17 +393,24 @@ export default function App() {
         onToggleRightPanel={() => setRightPanelOpen(!rightPanelOpen)}
       />
 
-      {/* 2. Main Center Workstation Area */}
+      {/* 2. Main Workstation Area: Single Unified Editing Canvas */}
       <main className="flex-1 flex flex-col overflow-hidden relative w-full h-full">
-        {/* Central Taiko Lane Real-time Preview (Top Game View) */}
-        <div className="flex-1 min-h-[140px] relative w-full overflow-hidden">
-          <CentralCanvas
-            chart={chart}
-            measures={measures}
-            currentTime={currentTime}
-            isPlaying={isPlaying}
-          />
-        </div>
+        <UnifiedEditorCanvas
+          chart={chart}
+          measures={measures}
+          currentTime={currentTime}
+          isPlaying={isPlaying}
+          onSeek={handleSeekTime}
+          selectedNoteType={selectedNoteType}
+          snap={snap}
+          zoom={zoom}
+          onAddNote={handleAddNote}
+          onDeleteNote={handleDeleteNote}
+          onMoveNote={handleMoveNote}
+          selectedNoteIds={selectedNoteIds}
+          onSelectNotes={setSelectedNoteIds}
+          audioPeaks={audioPeaks}
+        />
 
         {/* Slide-over Drawers */}
         <LeftPanel
@@ -423,24 +429,6 @@ export default function App() {
           onChangeHeader={(newHeader) =>
             updateChartWithHistory({ ...chart, header: newHeader })
           }
-        />
-
-        {/* Integrated Waveform & Note Timeline (Bottom Timeline Area) */}
-        <TimelineCanvas
-          chart={chart}
-          measures={measures}
-          currentTime={currentTime}
-          isPlaying={isPlaying}
-          onSeek={handleSeekTime}
-          selectedNoteType={selectedNoteType}
-          snap={snap}
-          zoom={zoom}
-          onAddNote={handleAddNote}
-          onDeleteNote={handleDeleteNote}
-          onMoveNote={handleMoveNote}
-          selectedNoteIds={selectedNoteIds}
-          onSelectNotes={setSelectedNoteIds}
-          audioPeaks={audioPeaks}
         />
       </main>
 
