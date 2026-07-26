@@ -191,7 +191,7 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         ctx.fill();
       }
 
-      // 5. Grid Lines & Measure Barlines
+      // 5. Grid Lines & Measure Barlines (Fixed layout independent of note SCROLL)
       const currentM = timeToMeasureAndPos(currentTime, measures);
       const currentPosVal = currentM.measureIndex + currentM.positionInMeasure;
 
@@ -232,7 +232,7 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         }
       }
 
-      // 6. Draw Events (BPM, Scroll, GoGo)
+      // 6. Draw Events (BPM, Scroll, GoGo) - Fixed layout
       for (const ev of chart.events) {
         const evMVal = ev.measureIndex + ev.positionInMeasure;
         const evX = judgeX + (evMVal - currentPosVal) * pxPerMeasure;
@@ -279,22 +279,27 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         ctx.fillText('連打開始点', rollStartX + 4, laneY - laneHeight / 2 - 18);
       }
 
-      // 8. Draw Notes
-      const radiusSmall = laneHeight * 0.35;
-      const radiusBig = laneHeight * 0.45;
+      // 8. Draw Notes (Dynamic position based on Time, BPM, and Note SCROLL Speed)
+      const radiusStandard = 15; // 30px diameter
+      const radiusBig = 20; // ~1.33x diameter (40px)
 
       for (const note of chart.notes) {
         if (note.type === 0) continue;
 
-        const noteMVal = note.measureIndex + note.positionInMeasure;
-        const noteX = judgeX + (noteMVal - currentPosVal) * pxPerMeasure;
+        // Note SCROLL multiplier from measure
+        const noteMeasure = measures[note.measureIndex] || activeMeasure;
+        const noteScroll = noteMeasure.scroll || 1.0;
 
-        // Sound trigger during playback
+        const noteMVal = note.measureIndex + note.positionInMeasure;
+        // SCROLL strictly modifies note speed / display position relative to judgment line
+        const noteX = judgeX + (noteMVal - currentPosVal) * pxPerMeasure * noteScroll;
+
+        // Sound trigger during playback when note passes judgment line
         const timeDiff = note.timeSeconds - currentTime;
         if (
           isPlaying &&
           timeDiff <= 0 &&
-          timeDiff >= -0.05 &&
+          timeDiff >= -0.06 &&
           !playedNoteIdsRef.current.has(note.id)
         ) {
           playedNoteIdsRef.current.add(note.id);
@@ -303,16 +308,16 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
 
         if (noteX >= -100 && noteX <= width + 100) {
           const isSelected = selectedNoteIds.includes(note.id);
-          const r = note.type === 3 || note.type === 4 || note.type === 6 ? radiusBig : radiusSmall;
+          const r = note.type === 3 || note.type === 4 || note.type === 6 ? radiusBig : radiusStandard;
 
           // Draw long roll / balloon body
           if (note.type === 5 || note.type === 6 || note.type === 7) {
             const duration = note.durationSeconds || 0.5;
             const endM = timeToMeasureAndPos(note.timeSeconds + duration, measures);
             const endMVal = endM.measureIndex + endM.positionInMeasure;
-            const endX = judgeX + (endMVal - currentPosVal) * pxPerMeasure;
+            const endX = judgeX + (endMVal - currentPosVal) * pxPerMeasure * noteScroll;
 
-            ctx.fillStyle = note.type === 7 ? 'rgba(255, 136, 0, 0.8)' : 'rgba(255, 204, 0, 0.8)';
+            ctx.fillStyle = note.type === 7 ? 'rgba(255, 136, 0, 0.85)' : 'rgba(255, 204, 0, 0.85)';
             ctx.fillRect(noteX, laneY - r, Math.max(12, endX - noteX), r * 2);
 
             ctx.beginPath();
