@@ -45,6 +45,7 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const playedNoteIdsRef = useRef<Set<string>>(new Set());
+  const lastTimeRef = useRef<number>(currentTime);
 
   // Roll / Balloon multi-tap creation state
   const [rollStartPoint, setRollStartPoint] = useState<{
@@ -68,11 +69,12 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
     hasDragged: false,
   });
 
-  // Reset played note tracking when playback stops or rewinds
+  // Track playback time updates for hit sound scheduling
   useEffect(() => {
-    if (!isPlaying || currentTime === 0) {
+    if (!isPlaying) {
       playedNoteIdsRef.current.clear();
     }
+    lastTimeRef.current = currentTime;
   }, [isPlaying, currentTime]);
 
   // Clear rollStartPoint if selected note type changes
@@ -80,8 +82,8 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
     setRollStartPoint(null);
   }, [selectedNoteType]);
 
-  // Base layout pixels per measure
-  const basePxPerMeasure = 240;
+  // Base layout pixels per measure (Official Taiko density: ~1 measure visible ahead)
+  const basePxPerMeasure = 520;
   const pxPerMeasure = basePxPerMeasure * zoom;
 
   // Render Loop
@@ -123,19 +125,31 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
 
       // 2. Taiko Lane (Main horizontal strip)
       const laneY = height * 0.52;
-      const laneHeight = Math.min(100, Math.max(70, height * 0.45));
+      const laneHeight = Math.min(110, Math.max(75, height * 0.45));
+      const laneTopY = laneY - laneHeight / 2;
+      const wfBandHeight = Math.round(laneHeight * 0.18); // ~18% top strip for waveform
 
       ctx.fillStyle = isGogo ? '#220400' : '#0D0D0D';
-      ctx.fillRect(0, laneY - laneHeight / 2, width, laneHeight);
+      ctx.fillRect(0, laneTopY, width, laneHeight);
       ctx.strokeStyle = isGogo ? '#FF4400' : '#2A2A2A';
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(0, laneY - laneHeight / 2, width, laneHeight);
+      ctx.strokeRect(0, laneTopY, width, laneHeight);
 
-      // 3. Integrated Waveform Overlaid on the Lane
+      // Dedicated Top Waveform Area
+      ctx.fillStyle = '#080808';
+      ctx.fillRect(0, laneTopY, width, wfBandHeight);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, laneTopY + wfBandHeight);
+      ctx.lineTo(width, laneTopY + wfBandHeight);
+      ctx.stroke();
+
+      // High-precision Waveform Rendering inside top strip
+      const judgeX = Math.max(90, width * 0.18);
       if (audioPeaks && audioPeaks.length > 0) {
-        ctx.fillStyle = isGogo ? 'rgba(255, 200, 0, 0.28)' : 'rgba(0, 204, 255, 0.28)';
+        ctx.fillStyle = isGogo ? '#FFB000' : '#00D0FF';
         const totalDuration = measures[measures.length - 1]?.timeSeconds || 120;
-        const judgeX = Math.max(90, width * 0.18);
         const step = 2;
 
         for (let px = 0; px < width; px += step) {
@@ -152,19 +166,23 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
             if (t >= 0 && t <= totalDuration) {
               const peakIdx = Math.floor((t / totalDuration) * audioPeaks.length);
               const peakVal = audioPeaks[peakIdx] || 0;
-              const h = peakVal * laneHeight * 0.8;
-              ctx.fillRect(px, laneY - h / 2, step, Math.max(1, h));
+              const h = Math.max(2, peakVal * (wfBandHeight - 2));
+              const yPeak = laneTopY + (wfBandHeight - h) / 2;
+              ctx.fillRect(px, yPeak, step, h);
             }
           }
         }
       }
 
-      // 4. Judgment Line & Taiko Icon
-      const judgeX = Math.max(90, width * 0.18);
+      // Label for Waveform
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.font = '8px sans-serif';
+      ctx.fillText('WAVEFORM', 8, laneTopY + wfBandHeight - 3);
 
+      // 4. Judgment Line & Taiko Icon
       // Outer Judgment Ring
       ctx.beginPath();
-      ctx.arc(judgeX, laneY, laneHeight * 0.44, 0, Math.PI * 2);
+      ctx.arc(judgeX, laneY + wfBandHeight / 2, laneHeight * 0.38, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
       ctx.fill();
       ctx.strokeStyle = '#FFFFFF';
@@ -173,20 +191,20 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
 
       // Inner Judgment Ring
       ctx.beginPath();
-      ctx.arc(judgeX, laneY, laneHeight * 0.32, 0, Math.PI * 2);
+      ctx.arc(judgeX, laneY + wfBandHeight / 2, laneHeight * 0.28, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
       // Left Taiko Drumhead Icon
-      const drumheadX = judgeX - laneHeight * 0.7;
+      const drumheadX = judgeX - laneHeight * 0.65;
       if (drumheadX > 15) {
         ctx.beginPath();
-        ctx.arc(drumheadX, laneY, laneHeight * 0.42, 0, Math.PI * 2);
+        ctx.arc(drumheadX, laneY + wfBandHeight / 2, laneHeight * 0.38, 0, Math.PI * 2);
         ctx.fillStyle = '#E82C0C';
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(drumheadX, laneY, laneHeight * 0.28, 0, Math.PI * 2);
+        ctx.arc(drumheadX, laneY + wfBandHeight / 2, laneHeight * 0.24, 0, Math.PI * 2);
         ctx.fillStyle = '#FFFFFF';
         ctx.fill();
       }
@@ -204,14 +222,14 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(mX, laneY - laneHeight / 2);
-            ctx.lineTo(mX, laneY + laneHeight / 2);
+            ctx.moveTo(mX, laneTopY + wfBandHeight);
+            ctx.lineTo(mX, laneTopY + laneHeight);
             ctx.stroke();
 
             // Measure Number Label
             ctx.fillStyle = '#AAAAAA';
             ctx.font = 'bold 11px sans-serif';
-            ctx.fillText(`M${m + 1}`, mX + 4, laneY - laneHeight / 2 - 5);
+            ctx.fillText(`M${m + 1}`, mX + 4, laneTopY + wfBandHeight - 3);
           }
 
           // Sub-grid ticks according to Snap
@@ -222,8 +240,8 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
 
             if (tickX >= -20 && tickX <= width + 20) {
               ctx.beginPath();
-              ctx.moveTo(tickX, laneY - laneHeight / 2);
-              ctx.lineTo(tickX, laneY + laneHeight / 2);
+              ctx.moveTo(tickX, laneTopY + wfBandHeight);
+              ctx.lineTo(tickX, laneTopY + laneHeight);
               ctx.strokeStyle = isQuarter ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.08)';
               ctx.lineWidth = 1;
               ctx.stroke();
@@ -232,17 +250,13 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         }
       }
 
-      // 6. Draw Events (BPM, Scroll, GoGo) - Fixed layout
+      // 6. Draw Events (#SCROLL, #BPMCHANGE, #GOGO) at exact fractional time position
       for (const ev of chart.events) {
         const evMVal = ev.measureIndex + ev.positionInMeasure;
         const evX = judgeX + (evMVal - currentPosVal) * pxPerMeasure;
 
         if (evX >= -50 && evX <= width + 50) {
-          const evY = laneY - laneHeight / 2 - 14;
-
-          ctx.beginPath();
-          ctx.arc(evX, evY, 4, 0, Math.PI * 2);
-          ctx.fillStyle =
+          const color =
             ev.type === 'BPMCHANGE'
               ? '#FFB000'
               : ev.type === 'SCROLL'
@@ -252,11 +266,23 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
               : ev.type === 'GOGOSTART' || ev.type === 'GOGOEND'
               ? '#F43F5E'
               : '#A855F7';
+
+          // Fine vertical event marker across lane
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(evX, laneTopY + wfBandHeight);
+          ctx.lineTo(evX, laneTopY + laneHeight);
+          ctx.stroke();
+
+          // Small badge above lane
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(evX, laneTopY - 7, 3.5, 0, Math.PI * 2);
           ctx.fill();
 
-          ctx.fillStyle = '#CCCCCC';
           ctx.font = '9px sans-serif';
-          ctx.fillText(ev.value ? `${ev.type}:${ev.value}` : ev.type, evX + 6, evY + 3);
+          ctx.fillText(ev.value ? `${ev.type}:${ev.value}` : ev.type, evX + 5, laneTopY - 4);
         }
       }
 
@@ -269,42 +295,53 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         ctx.lineWidth = 2;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
-        ctx.moveTo(rollStartX, laneY - laneHeight / 2 - 10);
-        ctx.lineTo(rollStartX, laneY + laneHeight / 2 + 10);
+        ctx.moveTo(rollStartX, laneTopY);
+        ctx.lineTo(rollStartX, laneTopY + laneHeight);
         ctx.stroke();
         ctx.setLineDash([]);
 
         ctx.fillStyle = '#FFCC00';
         ctx.font = 'bold 10px sans-serif';
-        ctx.fillText('連打開始点', rollStartX + 4, laneY - laneHeight / 2 - 18);
+        ctx.fillText('連打開始点', rollStartX + 4, laneTopY - 14);
       }
 
-      // 8. Draw Notes (Dynamic position based on Time, BPM, and Note SCROLL Speed)
-      const radiusStandard = 15; // 30px diameter
-      const radiusBig = 20; // ~1.33x diameter (40px)
+      // 8. Hit Sound Scheduler & Notes Rendering
+      const notesY = laneY + wfBandHeight / 2;
+      const radiusStandard = 15; // 30px standard note
+      const radiusBig = 20; // ~1.33x big note (40px)
+
+      // Precise hit sound trigger during playback frame
+      if (isPlaying) {
+        const fromT = lastTimeRef.current;
+        const toT = currentTime;
+
+        if (toT > fromT) {
+          for (const note of chart.notes) {
+            if (note.type === 0) continue;
+            if (
+              note.timeSeconds >= fromT - 0.01 &&
+              note.timeSeconds <= toT + 0.015 &&
+              !playedNoteIdsRef.current.has(note.id)
+            ) {
+              playedNoteIdsRef.current.add(note.id);
+              audioEngine.playHitSound(note.type);
+            }
+          }
+        }
+        lastTimeRef.current = currentTime;
+      }
 
       for (const note of chart.notes) {
         if (note.type === 0) continue;
 
-        // Note SCROLL multiplier from measure
+        // In Edit Mode, note density/spacing is kept uniform (Beat Position based).
+        // In Play Mode, #SCROLL alters note display speed.
         const noteMeasure = measures[note.measureIndex] || activeMeasure;
         const noteScroll = noteMeasure.scroll || 1.0;
+        const effectiveScroll = isPlaying ? noteScroll : 1.0;
 
         const noteMVal = note.measureIndex + note.positionInMeasure;
-        // SCROLL strictly modifies note speed / display position relative to judgment line
-        const noteX = judgeX + (noteMVal - currentPosVal) * pxPerMeasure * noteScroll;
-
-        // Sound trigger during playback when note passes judgment line
-        const timeDiff = note.timeSeconds - currentTime;
-        if (
-          isPlaying &&
-          timeDiff <= 0 &&
-          timeDiff >= -0.06 &&
-          !playedNoteIdsRef.current.has(note.id)
-        ) {
-          playedNoteIdsRef.current.add(note.id);
-          audioEngine.playHitSound(note.type);
-        }
+        const noteX = judgeX + (noteMVal - currentPosVal) * pxPerMeasure * effectiveScroll;
 
         if (noteX >= -100 && noteX <= width + 100) {
           const isSelected = selectedNoteIds.includes(note.id);
@@ -315,13 +352,13 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
             const duration = note.durationSeconds || 0.5;
             const endM = timeToMeasureAndPos(note.timeSeconds + duration, measures);
             const endMVal = endM.measureIndex + endM.positionInMeasure;
-            const endX = judgeX + (endMVal - currentPosVal) * pxPerMeasure * noteScroll;
+            const endX = judgeX + (endMVal - currentPosVal) * pxPerMeasure * effectiveScroll;
 
             ctx.fillStyle = note.type === 7 ? 'rgba(255, 136, 0, 0.85)' : 'rgba(255, 204, 0, 0.85)';
-            ctx.fillRect(noteX, laneY - r, Math.max(12, endX - noteX), r * 2);
+            ctx.fillRect(noteX, notesY - r, Math.max(12, endX - noteX), r * 2);
 
             ctx.beginPath();
-            ctx.arc(endX, laneY, r, 0, Math.PI * 2);
+            ctx.arc(endX, notesY, r, 0, Math.PI * 2);
             ctx.fill();
             ctx.strokeStyle = '#000000';
             ctx.lineWidth = 1.5;
@@ -330,7 +367,7 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
 
           // Note Head Circle
           ctx.beginPath();
-          ctx.arc(noteX, laneY, r, 0, Math.PI * 2);
+          ctx.arc(noteX, notesY, r, 0, Math.PI * 2);
 
           switch (note.type) {
             case 1:
@@ -360,7 +397,7 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
           // Highlight selection
           if (isSelected) {
             ctx.beginPath();
-            ctx.arc(noteX, laneY, r + 4, 0, Math.PI * 2);
+            ctx.arc(noteX, notesY, r + 4, 0, Math.PI * 2);
             ctx.strokeStyle = '#FF5A36';
             ctx.lineWidth = 2.5;
             ctx.stroke();
@@ -526,7 +563,6 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
 
         onAddNote(newNote);
         audioEngine.playHitSound(selectedNoteType);
-        onSeek(timeSeconds);
       }
     }
 

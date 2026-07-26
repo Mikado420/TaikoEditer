@@ -49,7 +49,7 @@ export class AudioEngine {
     return buffer.duration;
   }
 
-  public generateWaveformPeaks(samplesCount = 1000): Float32Array {
+  public generateWaveformPeaks(samplesCount = 2000): Float32Array {
     if (!this.audioBuffer) {
       this.waveformPeaks = new Float32Array(samplesCount).fill(0);
       return this.waveformPeaks;
@@ -62,8 +62,9 @@ export class AudioEngine {
     for (let i = 0; i < samplesCount; i++) {
       let max = 0;
       const start = i * step;
-      for (let j = 0; j < step; j++) {
-        const val = Math.abs(rawData[start + j] || 0);
+      const end = Math.min(start + step, rawData.length);
+      for (let j = start; j < end; j++) {
+        const val = Math.abs(rawData[j] || 0);
         if (val > max) max = val;
       }
       peaks[i] = max;
@@ -73,7 +74,7 @@ export class AudioEngine {
     return peaks;
   }
 
-  public getWaveformPeaks(samplesCount = 1000): Float32Array | null {
+  public getWaveformPeaks(samplesCount = 2000): Float32Array | null {
     if (!this.waveformPeaks) {
       return this.generateWaveformPeaks(samplesCount);
     }
