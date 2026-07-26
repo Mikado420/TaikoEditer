@@ -1,7 +1,16 @@
 import { ChartEvent, ChartHeader, Note, NoteType, TaikoChart } from '../types/chart';
 
+type BufferItem =
+  | { type: 'note'; char: string }
+  | {
+      type: 'command';
+      name: string;
+      arg: string;
+      eventId: string;
+    };
+
 /**
- * Parses a TJA text format file into a TaikoChart structure.
+ * Parses a TJA text format file into a TaikoChart structure with exact intra-measure event positioning.
  */
 export function parseTja(tjaContent: string): TaikoChart {
   const lines = tjaContent.split(/\r?\n/);
@@ -29,9 +38,118 @@ export function parseTja(tjaContent: string): TaikoChart {
   const events: ChartEvent[] = [];
 
   let currentMeasureIndex = 0;
-  let measureNoteBuffer: { char: string; rawLine: string }[] = [];
+  let measureBuffer: BufferItem[] = [];
 
-  // Parse header lines and find target course
+  // Helper to commit buffer items on measure delimiter (',')
+  const commitMeasureBuffer = (mIdx: number) => {
+    const totalNotesInMeasure = measureBuffer.filter((i) => i.type === 'note').length;
+    let noteIndex = 0;
+
+    for (const item of measureBuffer) {
+      const posInMeasure =
+        totalNotesInMeasure > 0 ? noteIndex / totalNotesInMeasure : 0.0;
+
+      if (item.type === 'note') {
+        const noteDigit = parseInt(item.char, 10);
+        if (!isNaN(noteDigit) && noteDigit > 0 && noteDigit <= 8) {
+          notes.push({
+            id: `note_${mIdx}_${noteIndex}_${Math.random().toString(36).substring(2, 6)}`,
+            type: noteDigit as NoteType,
+            measureIndex: mIdx,
+            positionInMeasure: posInMeasure,
+            timeSeconds: 0,
+          });
+        }
+        noteIndex++;
+      } else if (item.type === 'command') {
+        const { name, arg, eventId } = item;
+        if (name === 'BPMCHANGE') {
+          events.push({
+            id: eventId,
+            type: 'BPMCHANGE',
+            measureIndex: mIdx,
+            positionInMeasure: posInMeasure,
+            timeSeconds: 0,
+            value: parseFloat(arg) || 120,
+          });
+        } else if (name === 'MEASURE') {
+          const mParts = arg.split('/');
+          if (mParts.length === 2) {
+            events.push({
+              id: eventId,
+              type: 'MEASURE',
+              measureIndex: mIdx,
+              positionInMeasure: posInMeasure,
+              timeSeconds: 0,
+              numerator: parseInt(mParts[0], 10) || 4,
+              denominator: parseInt(mParts[1], 10) || 4,
+            });
+          }
+        } else if (name === 'SCROLL') {
+          events.push({
+            id: eventId,
+            type: 'SCROLL',
+            measureIndex: mIdx,
+            positionInMeasure: posInMeasure,
+            timeSeconds: 0,
+            value: parseFloat(arg) || 1.0,
+          });
+        } else if (name === 'GOGOSTART') {
+          events.push({
+            id: eventId,
+            type: 'GOGOSTART',
+            measureIndex: mIdx,
+            positionInMeasure: posInMeasure,
+            timeSeconds: 0,
+          });
+        } else if (name === 'GOGOEND') {
+          events.push({
+            id: eventId,
+            type: 'GOGOEND',
+            measureIndex: mIdx,
+            positionInMeasure: posInMeasure,
+            timeSeconds: 0,
+          });
+        } else if (name === 'DELAY') {
+          events.push({
+            id: eventId,
+            type: 'DELAY',
+            measureIndex: mIdx,
+            positionInMeasure: posInMeasure,
+            timeSeconds: 0,
+            value: parseFloat(arg) || 0,
+          });
+        } else if (name === 'BARLINEON') {
+          events.push({
+            id: eventId,
+            type: 'BARLINEON',
+            measureIndex: mIdx,
+            positionInMeasure: posInMeasure,
+            timeSeconds: 0,
+          });
+        } else if (name === 'BARLINEOFF') {
+          events.push({
+            id: eventId,
+            type: 'BARLINEOFF',
+            measureIndex: mIdx,
+            positionInMeasure: posInMeasure,
+            timeSeconds: 0,
+          });
+        } else if (name === 'LYRIC') {
+          events.push({
+            id: eventId,
+            type: 'LYRIC',
+            measureIndex: mIdx,
+            positionInMeasure: posInMeasure,
+            timeSeconds: 0,
+            text: arg,
+          });
+        }
+      }
+    }
+  };
+
+  // Parse lines
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i].trim();
     if (!rawLine || rawLine.startsWith('//')) continue;
@@ -94,99 +212,37 @@ export function parseTja(tjaContent: string): TaikoChart {
       inCommandSection = true;
       inCourse = true;
       currentMeasureIndex = 0;
-      measureNoteBuffer = [];
+      measureBuffer = [];
       continue;
     }
 
     if (rawLine.toUpperCase().startsWith('#END')) {
       inCommandSection = false;
-      break; // Finish parsing first course for simplicity
+      break;
     }
 
     if (inCourse && inCommandSection) {
       if (rawLine.startsWith('#')) {
-        // Event command tag inside course
         const cmdParts = rawLine.slice(1).trim().split(/\s+/);
         const cmdName = cmdParts[0].toUpperCase();
         const cmdArg = cmdParts.slice(1).join(' ');
-
-        // Position of command within current measure buffer
-        // If buffer has items, position = buffer.length / estimate
-        // For simplicity, event before measure end attaches at measureIndex with position = 0 or relative to buffer
-        const pos = measureNoteBuffer.length > 0 ? 0.0 : 0.0;
-
         const eventId = `ev_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-        if (cmdName === 'BPMCHANGE') {
-          events.push({
-            id: eventId,
-            type: 'BPMCHANGE',
-            measureIndex: currentMeasureIndex,
-            positionInMeasure: pos,
-            timeSeconds: 0,
-            value: parseFloat(cmdArg) || 120,
-          });
-        } else if (cmdName === 'MEASURE') {
-          const mParts = cmdArg.split('/');
-          if (mParts.length === 2) {
-            events.push({
-              id: eventId,
-              type: 'MEASURE',
-              measureIndex: currentMeasureIndex,
-              positionInMeasure: pos,
-              timeSeconds: 0,
-              numerator: parseInt(mParts[0], 10) || 4,
-              denominator: parseInt(mParts[1], 10) || 4,
-            });
-          }
-        } else if (cmdName === 'SCROLL') {
-          events.push({
-            id: eventId,
-            type: 'SCROLL',
-            measureIndex: currentMeasureIndex,
-            positionInMeasure: pos,
-            timeSeconds: 0,
-            value: parseFloat(cmdArg) || 1.0,
-          });
-        } else if (cmdName === 'GOGOSTART') {
-          events.push({ id: eventId, type: 'GOGOSTART', measureIndex: currentMeasureIndex, positionInMeasure: pos, timeSeconds: 0 });
-        } else if (cmdName === 'GOGOEND') {
-          events.push({ id: eventId, type: 'GOGOEND', measureIndex: currentMeasureIndex, positionInMeasure: pos, timeSeconds: 0 });
-        } else if (cmdName === 'DELAY') {
-          events.push({ id: eventId, type: 'DELAY', measureIndex: currentMeasureIndex, positionInMeasure: pos, timeSeconds: 0, value: parseFloat(cmdArg) || 0 });
-        } else if (cmdName === 'BARLINEON') {
-          events.push({ id: eventId, type: 'BARLINEON', measureIndex: currentMeasureIndex, positionInMeasure: pos, timeSeconds: 0 });
-        } else if (cmdName === 'BARLINEOFF') {
-          events.push({ id: eventId, type: 'BARLINEOFF', measureIndex: currentMeasureIndex, positionInMeasure: pos, timeSeconds: 0 });
-        } else if (cmdName === 'LYRIC') {
-          events.push({ id: eventId, type: 'LYRIC', measureIndex: currentMeasureIndex, positionInMeasure: pos, timeSeconds: 0, text: cmdArg });
-        }
+        measureBuffer.push({
+          type: 'command',
+          name: cmdName,
+          arg: cmdArg,
+          eventId,
+        });
       } else {
-        // Line containing note digits (0-8) and possibly ',' at the end
         const chars = rawLine.split('');
         for (const char of chars) {
           if (char === ',') {
-            // End of measure reached! Flush measureNoteBuffer
-            const totalInMeasure = measureNoteBuffer.length;
-            if (totalInMeasure > 0) {
-              measureNoteBuffer.forEach((item, idx) => {
-                const noteDigit = parseInt(item.char, 10);
-                if (!isNaN(noteDigit) && noteDigit > 0 && noteDigit <= 8) {
-                  const posInMeasure = idx / totalInMeasure;
-                  notes.push({
-                    id: `note_${currentMeasureIndex}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
-                    type: noteDigit as NoteType,
-                    measureIndex: currentMeasureIndex,
-                    positionInMeasure: posInMeasure,
-                    timeSeconds: 0,
-                  });
-                }
-              });
-            }
+            commitMeasureBuffer(currentMeasureIndex);
             currentMeasureIndex++;
-            measureNoteBuffer = [];
+            measureBuffer = [];
           } else if (/[0-8]/.test(char)) {
-            measureNoteBuffer.push({ char, rawLine });
+            measureBuffer.push({ type: 'note', char });
           }
         }
       }

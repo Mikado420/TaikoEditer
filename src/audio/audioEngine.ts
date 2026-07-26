@@ -38,18 +38,18 @@ export class AudioEngine {
     const arrayBuffer = await file.arrayBuffer();
     this.audioBuffer = await ctx.decodeAudioData(arrayBuffer);
     this.pauseOffset = 0;
-    this.generateWaveformPeaks(1000);
+    this.generateWaveformPeaks(30000);
     return this.audioBuffer.duration;
   }
 
   public async loadAudioBuffer(buffer: AudioBuffer): Promise<number> {
     this.audioBuffer = buffer;
     this.pauseOffset = 0;
-    this.generateWaveformPeaks(1000);
+    this.generateWaveformPeaks(30000);
     return buffer.duration;
   }
 
-  public generateWaveformPeaks(samplesCount = 2000): Float32Array {
+  public generateWaveformPeaks(samplesCount = 30000): Float32Array {
     if (!this.audioBuffer) {
       this.waveformPeaks = new Float32Array(samplesCount).fill(0);
       return this.waveformPeaks;
@@ -74,7 +74,7 @@ export class AudioEngine {
     return peaks;
   }
 
-  public getWaveformPeaks(samplesCount = 2000): Float32Array | null {
+  public getWaveformPeaks(samplesCount = 30000): Float32Array | null {
     if (!this.waveformPeaks) {
       return this.generateWaveformPeaks(samplesCount);
     }

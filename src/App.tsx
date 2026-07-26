@@ -30,6 +30,7 @@ import { ProjectModal } from './components/Modals/ProjectModal';
 import { EventEditModal } from './components/Modals/EventEditModal';
 import { ShortcutsModal } from './components/Modals/ShortcutsModal';
 import { TutorialModal } from './components/Modals/TutorialModal';
+import { TjaSourceModal } from './components/TjaSourceModal';
 import { UpdateBanner } from './components/PWA/UpdateBanner';
 
 import { processImportedFile } from './utils/fileImporter';
@@ -55,6 +56,7 @@ export default function App() {
   const [snap, setSnap] = useState<SnapValue>(16);
   const [zoom, setZoom] = useState<ZoomValue>(1.0);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [renderMode, setRenderMode] = useState<'edit' | 'play'>('edit');
 
   // Playback & Audio State
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -80,6 +82,7 @@ export default function App() {
   const [eventModalOpen, setEventModalOpen] = useState<boolean>(false);
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState<boolean>(false);
   const [tutorialModalOpen, setTutorialModalOpen] = useState<boolean>(false);
+  const [tjaModalOpen, setTjaModalOpen] = useState<boolean>(false);
 
   // First-time tutorial check
   useEffect(() => {
@@ -376,10 +379,13 @@ export default function App() {
       <Header
         chart={chart}
         isPlaying={isPlaying}
+        renderMode={renderMode}
+        onToggleRenderMode={() => setRenderMode(renderMode === 'edit' ? 'play' : 'edit')}
         onTogglePlay={togglePlay}
         onStop={handleStop}
         onOpenProjectModal={() => setProjectModalOpen(true)}
         onOpenShortcutsModal={() => setShortcutsModalOpen(true)}
+        onOpenTjaModal={() => setTjaModalOpen(true)}
         onImportFile={handleImportFile}
         onExportTja={handleExportTja}
         onLoadAudio={handleLoadAudio}
@@ -400,6 +406,7 @@ export default function App() {
           measures={measures}
           currentTime={currentTime}
           isPlaying={isPlaying}
+          renderMode={renderMode}
           onSeek={handleSeekTime}
           selectedNoteType={selectedNoteType}
           snap={snap}
@@ -502,6 +509,21 @@ export default function App() {
       <TutorialModal
         isOpen={tutorialModalOpen}
         onClose={handleCloseTutorial}
+      />
+
+      <TjaSourceModal
+        isOpen={tjaModalOpen}
+        onClose={() => setTjaModalOpen(false)}
+        chart={chart}
+        onApplyTja={(newChart) => updateChartWithHistory(newChart)}
+        currentMeasureIndex={Math.max(
+          0,
+          measures.findIndex(
+            (m) =>
+              currentTime >= m.timeSeconds &&
+              currentTime < m.timeSeconds + m.durationSeconds
+          )
+        )}
       />
 
       <UpdateBanner

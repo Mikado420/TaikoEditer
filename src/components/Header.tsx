@@ -11,16 +11,22 @@ import {
   DownloadCloud,
   FileText,
   Sliders,
+  FileCode,
+  Eye,
+  Edit3,
 } from 'lucide-react';
 import { TaikoChart } from '../types/chart';
 
 interface HeaderProps {
   chart: TaikoChart;
   isPlaying: boolean;
+  renderMode: 'edit' | 'play';
+  onToggleRenderMode: () => void;
   onTogglePlay: () => void;
   onStop: () => void;
   onOpenProjectModal: () => void;
   onOpenShortcutsModal: () => void;
+  onOpenTjaModal: () => void;
   onImportFile: (file: File) => void;
   onExportTja: () => void;
   onLoadAudio: (file: File) => void;
@@ -37,10 +43,13 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   chart,
   isPlaying,
+  renderMode,
+  onToggleRenderMode,
   onTogglePlay,
   onStop,
   onOpenProjectModal,
   onOpenShortcutsModal,
+  onOpenTjaModal,
   onImportFile,
   onExportTja,
   onLoadAudio,
@@ -88,7 +97,7 @@ export const Header: React.FC<HeaderProps> = ({
         className="hidden"
       />
 
-      {/* Left: Left Panel Toggle & Project Modal Button */}
+      {/* Left: Left Panel Toggle, Project Modal, & TJA Source */}
       <div className="flex items-center gap-1.5 shrink-0">
         <button
           onClick={onToggleLeftPanel}
@@ -105,16 +114,39 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={onOpenProjectModal}
-          className="flex items-center gap-1 bg-[#222222] hover:bg-[#2C2C2C] active:scale-95 transition px-2 py-1 rounded-lg border border-[#383838] text-gray-200 text-[11px] truncate max-w-[140px] sm:max-w-[200px]"
+          className="flex items-center gap-1 bg-[#222222] hover:bg-[#2C2C2C] active:scale-95 transition px-2 py-1 rounded-lg border border-[#383838] text-gray-200 text-[11px] truncate max-w-[130px] sm:max-w-[180px]"
           title="プロジェクト一覧"
         >
           <FolderOpen size={13} className="text-[#FF5A36] shrink-0" />
           <span className="truncate font-semibold">{chart.header.title || '無題の譜面'}</span>
         </button>
+
+        <button
+          onClick={onOpenTjaModal}
+          className="flex items-center gap-1 px-2 py-1 bg-[#222222] hover:bg-[#2C2C2C] border border-[#383838] text-amber-400 hover:text-amber-300 rounded-lg transition text-[11px] font-semibold active:scale-95"
+          title="TJAソースエディタを開く"
+        >
+          <FileCode size={13} />
+          <span className="hidden sm:inline">TJA Source</span>
+        </button>
       </div>
 
-      {/* Middle Playback Shortcut */}
-      <div className="flex items-center gap-1 shrink-0">
+      {/* Middle: Playback & Render Mode Switcher */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        {/* Render Mode Switcher */}
+        <button
+          onClick={onToggleRenderMode}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition active:scale-95 ${
+            renderMode === 'play'
+              ? 'bg-rose-950/80 border-rose-600 text-rose-300'
+              : 'bg-sky-950/80 border-sky-600 text-sky-300'
+          }`}
+          title={renderMode === 'play' ? '演奏モード（演出重視）' : '編集モード（一定間隔描画）'}
+        >
+          {renderMode === 'play' ? <Eye size={13} /> : <Edit3 size={13} />}
+          <span>{renderMode === 'play' ? '演奏' : '編集'}</span>
+        </button>
+
         <button
           onClick={onTogglePlay}
           className={`flex items-center gap-1 px-3 py-1 rounded-lg font-bold text-white shadow transition active:scale-95 text-[11px] ${

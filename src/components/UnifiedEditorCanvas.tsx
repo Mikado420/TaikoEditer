@@ -15,6 +15,7 @@ interface UnifiedEditorCanvasProps {
   measures: MeasureInfo[];
   currentTime: number;
   isPlaying: boolean;
+  renderMode?: 'edit' | 'play';
   onSeek: (time: number) => void;
   selectedNoteType: NoteType;
   snap: SnapValue;
@@ -32,6 +33,7 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
   measures,
   currentTime,
   isPlaying,
+  renderMode = 'edit',
   onSeek,
   selectedNoteType,
   snap,
@@ -110,9 +112,10 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         ) || measures[0] || { bpm: chart.header.bpm || 120, scroll: 1.0, isGogo: false };
 
       const isGogo = activeMeasure.isGogo;
+      const isPlayGogo = renderMode === 'play' && isGogo;
 
       // 1. Stage Background
-      if (isGogo) {
+      if (isPlayGogo) {
         const grad = ctx.createLinearGradient(0, 0, 0, height);
         grad.addColorStop(0, '#380800');
         grad.addColorStop(0.5, '#731400');
@@ -129,9 +132,9 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       const laneTopY = laneY - laneHeight / 2;
       const wfBandHeight = Math.round(laneHeight * 0.18); // ~18% top strip for waveform
 
-      ctx.fillStyle = isGogo ? '#220400' : '#0D0D0D';
+      ctx.fillStyle = isPlayGogo ? '#220400' : '#0D0D0D';
       ctx.fillRect(0, laneTopY, width, laneHeight);
-      ctx.strokeStyle = isGogo ? '#FF4400' : '#2A2A2A';
+      ctx.strokeStyle = isPlayGogo ? '#FF4400' : '#2A2A2A';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(0, laneTopY, width, laneHeight);
 
@@ -145,11 +148,12 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       ctx.lineTo(width, laneTopY + wfBandHeight);
       ctx.stroke();
 
-      // High-precision Waveform Rendering inside top strip
+      // High-precision Waveform Rendering inside top strip (OFFSET aligned)
       const judgeX = Math.max(90, width * 0.18);
       if (audioPeaks && audioPeaks.length > 0) {
-        ctx.fillStyle = isGogo ? '#FFB000' : '#00D0FF';
-        const totalDuration = measures[measures.length - 1]?.timeSeconds || 120;
+        ctx.fillStyle = isPlayGogo ? '#FFB000' : '#00D0FF';
+        const audioDuration = audioEngine.getDuration() || 180;
+        const offsetSec = chart.header.offset || 0;
         const step = 2;
 
         for (let px = 0; px < width; px += step) {
@@ -161,10 +165,12 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
           if (targetMVal >= 0) {
             const mIdx = Math.floor(targetMVal);
             const posRatio = targetMVal - mIdx;
-            const t = measureAndPosToTime(mIdx, posRatio, measures);
+            const chartT = measureAndPosToTime(mIdx, posRatio, measures);
+            // Audio Time aligned with TJA OFFSET
+            const audioT = chartT + offsetSec;
 
-            if (t >= 0 && t <= totalDuration) {
-              const peakIdx = Math.floor((t / totalDuration) * audioPeaks.length);
+            if (audioT >= 0 && audioT <= audioDuration) {
+              const peakIdx = Math.floor((audioT / audioDuration) * audioPeaks.length);
               const peakVal = audioPeaks[peakIdx] || 0;
               const h = Math.max(2, peakVal * (wfBandHeight - 2));
               const yPeak = laneTopY + (wfBandHeight - h) / 2;
