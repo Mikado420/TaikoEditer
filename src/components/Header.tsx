@@ -21,7 +21,7 @@ interface HeaderProps {
   onStop: () => void;
   onOpenProjectModal: () => void;
   onOpenShortcutsModal: () => void;
-  onImportTja: (file: File) => void;
+  onImportFile: (file: File) => void;
   onExportTja: () => void;
   onLoadAudio: (file: File) => void;
   isAudioLoaded: boolean;
@@ -37,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   onStop,
   onOpenProjectModal,
   onOpenShortcutsModal,
-  onImportTja,
+  onImportFile,
   onExportTja,
   onLoadAudio,
   isAudioLoaded,
@@ -45,12 +45,12 @@ export const Header: React.FC<HeaderProps> = ({
   pwaPrompt,
   onInstallPwa,
 }) => {
-  const tjaInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
 
-  const handleTjaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      onImportTja(e.target.files[0]);
+      onImportFile(e.target.files[0]);
       e.target.value = '';
     }
   };
@@ -63,19 +63,19 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="h-12 bg-[#141414] border-b border-[#3A3A3A] px-2 flex items-center justify-between gap-2 text-xs shrink-0 select-none">
+    <header className="h-12 bg-[#141414] border-b border-[#3A3A3A] px-2 flex items-center justify-between gap-2 text-xs shrink-0 select-none safe-pl safe-pr safe-pt">
       {/* Hidden File Inputs */}
       <input
         type="file"
-        ref={tjaInputRef}
-        accept=".tja,.txt"
-        onChange={handleTjaChange}
+        ref={fileInputRef}
+        accept=".tja,.txt,.zip,audio/*"
+        onChange={handleFileChange}
         className="hidden"
       />
       <input
         type="file"
         ref={audioInputRef}
-        accept="audio/*"
+        accept="audio/*,.zip"
         onChange={handleAudioChange}
         className="hidden"
       />
@@ -147,12 +147,12 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         <button
-          onClick={() => tjaInputRef.current?.click()}
+          onClick={() => fileInputRef.current?.click()}
           className="flex items-center gap-1 px-2 py-1 bg-[#262626] hover:bg-[#333333] border border-[#3A3A3A] text-gray-200 rounded transition text-[11px]"
-          title="TJAファイルを読み込む"
+          title="TJA / ZIP / 音声ファイルを読み込む"
         >
           <Upload size={13} className="text-sky-400" />
-          <span className="hidden sm:inline">TJA読込</span>
+          <span className="hidden sm:inline">ファイル/ZIP読込</span>
         </button>
 
         <button

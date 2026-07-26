@@ -55,7 +55,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   const activeMeasure = measures[pos.measureIndex] || { bpm: 120 };
 
   return (
-    <footer className="h-6 bg-[#0F0F0F] border-t border-[#262626] px-2 flex items-center justify-between text-[10px] text-gray-400 font-mono select-none shrink-0">
+    <footer className="h-6 bg-[#0F0F0F] border-t border-[#262626] px-2 flex items-center justify-between text-[10px] text-gray-400 font-mono select-none shrink-0 safe-pb safe-pl safe-pr">
       {/* Left: Time & Measure position */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1 text-gray-300">

@@ -65,7 +65,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   };
 
   return (
-    <div className="h-12 bg-[#141414] border-t border-[#3A3A3A] px-2 flex items-center justify-between gap-1.5 shrink-0 select-none overflow-x-auto text-xs">
+    <div className="h-12 bg-[#141414] border-t border-[#3A3A3A] px-2 flex items-center justify-between gap-1.5 shrink-0 select-none overflow-x-auto text-xs custom-scrollbar safe-pl safe-pr">
       {/* Note Type Buttons */}
       <div className="flex items-center gap-1 shrink-0">
         {noteButtons.map((btn) => {

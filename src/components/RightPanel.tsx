@@ -59,7 +59,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   };
 
   return (
-    <aside className="w-[22%] min-w-[180px] max-w-[260px] bg-[#181818] border-l border-[#3A3A3A] flex flex-col shrink-0 text-xs z-10 select-none overflow-hidden">
+    <aside className="w-[22%] min-w-[160px] max-w-[260px] bg-[#181818] border-l border-[#3A3A3A] flex flex-col shrink-0 text-xs z-10 select-none overflow-hidden safe-pr">
       {/* Header */}
       <div className="h-9 px-2 bg-[#202020] border-b border-[#3A3A3A] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-1.5 font-bold text-gray-300 text-[11px]">

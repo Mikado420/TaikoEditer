@@ -404,7 +404,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className="h-[35%] min-h-[110px] bg-[#181818] border-t border-[#3A3A3A] relative select-none touch-none shrink-0"
+      className="h-[110px] sm:h-[150px] max-h-[30vh] bg-[#181818] border-t border-[#3A3A3A] relative select-none touch-none shrink-0"
     >
       <canvas
         ref={canvasRef}

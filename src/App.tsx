@@ -35,9 +35,16 @@ import { ShortcutsModal } from './components/Modals/ShortcutsModal';
 import { TutorialModal } from './components/Modals/TutorialModal';
 import { UpdateBanner } from './components/PWA/UpdateBanner';
 
+import { processImportedFile } from './utils/fileImporter';
+import { Upload, CheckCircle, AlertTriangle } from 'lucide-react';
+
 export default function App() {
   // Chart State
   const [chart, setChart] = useState<TaikoChart>(SAMPLE_CHARTS[0]);
+
+  // Toast / File Dragging State
+  const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
   // Undo / Redo History Stack (up to 100 history items)
   const [history, setHistory] = useState<TaikoChart[]>([SAMPLE_CHARTS[0]]);
@@ -264,13 +271,34 @@ export default function App() {
     });
   };
 
-  const handleImportTja = async (file: File) => {
-    const text = await file.text();
-    const importedChart = parseTja(text);
-    importedChart.header.title = file.name.replace(/\.tja$/i, '');
-    updateChartWithHistory(importedChart);
-    saveChartToDb(importedChart);
-    getAllChartsFromDb().then(setDbCharts);
+  const handleImportFile = async (file: File) => {
+    const result = await processImportedFile(file);
+
+    if (result.error) {
+      setToastMessage({ text: result.error, isError: true });
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
+
+    if (result.chart) {
+      updateChartWithHistory(result.chart);
+      saveChartToDb(result.chart);
+      getAllChartsFromDb().then(setDbCharts);
+    }
+
+    if (result.audioFile) {
+      await handleLoadAudio(result.audioFile);
+    }
+
+    const message =
+      result.chart && result.audioFile
+        ? '譜面と音源を読み込みました！'
+        : result.chart
+        ? '譜面データを読み込みました！'
+        : '音源ファイルを読み込みました！';
+
+    setToastMessage({ text: message, isError: false });
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
   const handleExportTja = () => {
@@ -282,6 +310,27 @@ export default function App() {
     a.download = `${chart.header.title || 'chart'}.tja`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Drag and Drop File Handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingFile(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.relatedTarget === null) {
+      setIsDraggingFile(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingFile(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      await handleImportFile(e.dataTransfer.files[0]);
+    }
   };
 
   // Note Edits
@@ -347,7 +396,12 @@ export default function App() {
   };
 
   return (
-    <div className="w-screen h-screen bg-[#1B1B1B] text-white flex flex-col overflow-hidden select-none touch-none">
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className="w-full h-[100dvh] max-h-[100dvh] bg-[#1B1B1B] text-white flex flex-col overflow-hidden select-none touch-none relative overscroll-none"
+    >
       {/* 1. Top Header */}
       <Header
         chart={chart}
@@ -356,7 +410,7 @@ export default function App() {
         onStop={handleStop}
         onOpenProjectModal={() => setProjectModalOpen(true)}
         onOpenShortcutsModal={() => setShortcutsModalOpen(true)}
-        onImportTja={handleImportTja}
+        onImportFile={handleImportFile}
         onExportTja={handleExportTja}
         onLoadAudio={handleLoadAudio}
         isAudioLoaded={isAudioLoaded}
@@ -487,6 +541,33 @@ export default function App() {
         newWorker={newSwWorker}
         onDismiss={() => setNewSwWorker(null)}
       />
+
+      {/* Drag & Drop File Overlay */}
+      {isDraggingFile && (
+        <div className="fixed inset-0 z-50 bg-[#FF5A36]/80 backdrop-blur-md flex flex-col items-center justify-center text-white pointer-events-none animate-fade-in border-4 border-dashed border-white m-2 rounded-2xl">
+          <Upload size={64} className="animate-bounce mb-3" />
+          <h2 className="text-xl font-bold">ファイルをドロップして読み込み</h2>
+          <p className="text-sm opacity-90 mt-1">.tja / .zip / .ogg / .mp3 / .wav に対応しています</p>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div
+          className={`fixed bottom-10 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl shadow-2xl border flex items-center gap-2.5 text-xs font-bold animate-bounce ${
+            toastMessage.isError
+              ? 'bg-rose-900/90 border-rose-500 text-rose-100'
+              : 'bg-emerald-900/90 border-emerald-500 text-emerald-100'
+          }`}
+        >
+          {toastMessage.isError ? (
+            <AlertTriangle size={18} className="text-rose-300 shrink-0" />
+          ) : (
+            <CheckCircle size={18} className="text-emerald-300 shrink-0" />
+          )}
+          <span>{toastMessage.text}</span>
+        </div>
+      )}
     </div>
   );
 }
