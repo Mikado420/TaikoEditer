@@ -7,7 +7,7 @@ import {
   TaikoChart,
   ZoomValue,
 } from '../types/chart';
-import { measureAndPosToTime, snapPosition, timeToMeasureAndPos } from '../utils/timeMath';
+import { getScrollAtPosition, measureAndPosToTime, snapPosition, timeToMeasureAndPos } from '../utils/timeMath';
 import { audioEngine } from '../audio/audioEngine';
 
 interface UnifiedEditorCanvasProps {
@@ -33,7 +33,7 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
   measures,
   currentTime,
   isPlaying,
-  renderMode = 'edit',
+  renderMode: propRenderMode,
   onSeek,
   selectedNoteType,
   snap,
@@ -45,6 +45,7 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
   onSelectNotes,
   audioPeaks,
 }) => {
+  const renderMode = propRenderMode || (isPlaying ? 'play' : 'edit');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const playedNoteIdsRef = useRef<Set<string>>(new Set());
   const lastTimeRef = useRef<number>(currentTime);
@@ -84,8 +85,8 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
     setRollStartPoint(null);
   }, [selectedNoteType]);
 
-  // Base layout pixels per measure (Official Taiko density: ~1 measure visible ahead)
-  const basePxPerMeasure = 520;
+  // Base layout pixels per measure (Official Taiko density: 16th notes tile seamlessly edge-to-edge)
+  const basePxPerMeasure = 784;
   const pxPerMeasure = basePxPerMeasure * zoom;
 
   // Render Loop
@@ -98,9 +99,12 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
     let animId: number;
 
     const render = () => {
-      const width = canvas.width;
-      const height = canvas.height;
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.width / dpr;
+      const height = canvas.height / dpr;
 
+      ctx.save();
+      ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, width, height);
 
       // Active measure info
@@ -114,141 +118,193 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       const isGogo = activeMeasure.isGogo;
       const isPlayGogo = renderMode === 'play' && isGogo;
 
-      // 1. Stage Background
+      // 1. Stage Background (Pure deep dark background matching reference screenshot)
       if (isPlayGogo) {
         const grad = ctx.createLinearGradient(0, 0, 0, height);
-        grad.addColorStop(0, '#380800');
-        grad.addColorStop(0.5, '#731400');
-        grad.addColorStop(1, '#260400');
+        grad.addColorStop(0, '#2D0500');
+        grad.addColorStop(0.5, '#591000');
+        grad.addColorStop(1, '#1E0300');
         ctx.fillStyle = grad;
       } else {
-        ctx.fillStyle = '#141414';
+        ctx.fillStyle = '#070709';
       }
       ctx.fillRect(0, 0, width, height);
 
-      // 2. Taiko Lane (Main horizontal strip)
+      // Fixed Layout Metrics: keep lane scale and judge line fixed
+      const miniMapHeight = 22;
+      const laneHeight = 116;
       const laneY = height * 0.52;
-      const laneHeight = Math.min(110, Math.max(75, height * 0.45));
       const laneTopY = laneY - laneHeight / 2;
-      const wfBandHeight = Math.round(laneHeight * 0.18); // ~18% top strip for waveform
+      const notesY = laneTopY + laneHeight / 2;
 
-      ctx.fillStyle = isPlayGogo ? '#220400' : '#0D0D0D';
+      // Note Sizes (Fixed standard & big ratios)
+      const radiusStandard = 24.5; // Diameter = 49px (exactly equals 16th note step 784/16 = 49px)
+      const radiusBig = 36;        // Diameter = 72px
+
+      // Fixed Judge Line offset from left edge (does not stretch or shift when screen width changes)
+      const judgeX = 180;
+
+      // -------------------------------------------------------------
+      // Top Mini-Map (Sub-track overview bar showing all notes)
+      // -------------------------------------------------------------
+      const miniMapTopY = laneTopY - miniMapHeight - 4;
+      ctx.fillStyle = '#0C0C10';
+      ctx.fillRect(0, miniMapTopY, width, miniMapHeight);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0, miniMapTopY, width, miniMapHeight);
+
+      // Mini-map notes & measure markers
+      const totalMeasures = Math.max(1, measures.length);
+      const miniMapWidthPerMeasure = width / Math.max(8, totalMeasures);
+
+      // Render barlines in mini-map
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.lineWidth = 1;
+      for (let m = 0; m <= totalMeasures; m++) {
+        const mx = m * miniMapWidthPerMeasure;
+        ctx.beginPath();
+        ctx.moveTo(mx, miniMapTopY);
+        ctx.lineTo(mx, miniMapTopY + miniMapHeight);
+        ctx.stroke();
+      }
+
+      // Render mini note dots
+      for (const note of chart.notes) {
+        if (note.type === 0) continue;
+        const noteMVal = note.measureIndex + note.positionInMeasure;
+        const nx = noteMVal * miniMapWidthPerMeasure;
+        const ny = miniMapTopY + miniMapHeight / 2;
+        const isBig = note.type === 3 || note.type === 4 || note.type === 6;
+        const nr = isBig ? 3.5 : 2.2;
+
+        ctx.beginPath();
+        ctx.arc(nx, ny, nr, 0, Math.PI * 2);
+
+        if (note.type === 1 || note.type === 3) {
+          ctx.fillStyle = '#F04C28';
+        } else if (note.type === 2 || note.type === 4) {
+          ctx.fillStyle = '#38BDF8';
+        } else if (note.type === 5 || note.type === 6) {
+          ctx.fillStyle = '#FACC15';
+        } else {
+          ctx.fillStyle = '#FB923C';
+        }
+        ctx.fill();
+      }
+
+      // Current playback view frame indicator on Mini-Map
+      const currentM = timeToMeasureAndPos(currentTime, measures);
+      const currentPosVal = currentM.measureIndex + currentM.positionInMeasure;
+      const playHeadMiniX = currentPosVal * miniMapWidthPerMeasure;
+
+      ctx.strokeStyle = '#FACC15';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(playHeadMiniX, miniMapTopY);
+      ctx.lineTo(playHeadMiniX, miniMapTopY + miniMapHeight);
+      ctx.stroke();
+
+      // -------------------------------------------------------------
+      // 2. Main Taiko Lane Strip
+      // -------------------------------------------------------------
+      ctx.fillStyle = isPlayGogo ? '#220600' : '#121215';
       ctx.fillRect(0, laneTopY, width, laneHeight);
-      ctx.strokeStyle = isPlayGogo ? '#FF4400' : '#2A2A2A';
+      ctx.strokeStyle = isPlayGogo ? '#FF4400' : '#3F3F46';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(0, laneTopY, width, laneHeight);
 
-      // Dedicated Top Waveform Area
-      ctx.fillStyle = '#080808';
-      ctx.fillRect(0, laneTopY, width, wfBandHeight);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-      ctx.lineWidth = 1;
+      // -------------------------------------------------------------
+      // 4. Judgment Ring (Golden Ring Frame matching reference screenshot)
+      // -------------------------------------------------------------
+      // Outer Golden Circle
       ctx.beginPath();
-      ctx.moveTo(0, laneTopY + wfBandHeight);
-      ctx.lineTo(width, laneTopY + wfBandHeight);
+      ctx.arc(judgeX, notesY, radiusBig + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = '#EAB308';
+      ctx.lineWidth = 2.5;
       ctx.stroke();
 
-      // High-precision Waveform Rendering inside top strip (OFFSET aligned)
-      const judgeX = Math.max(90, width * 0.18);
-      if (audioPeaks && audioPeaks.length > 0) {
-        ctx.fillStyle = isPlayGogo ? '#FFB000' : '#00D0FF';
-        const audioDuration = audioEngine.getDuration() || 180;
-        const offsetSec = chart.header.offset || 0;
-        const step = 2;
-
-        for (let px = 0; px < width; px += step) {
-          const deltaX = px - judgeX;
-          const deltaMeasures = deltaX / pxPerMeasure;
-          const currentM = timeToMeasureAndPos(currentTime, measures);
-          const targetMVal = currentM.measureIndex + currentM.positionInMeasure + deltaMeasures;
-
-          if (targetMVal >= 0) {
-            const mIdx = Math.floor(targetMVal);
-            const posRatio = targetMVal - mIdx;
-            const chartT = measureAndPosToTime(mIdx, posRatio, measures);
-            // Audio Time aligned with TJA OFFSET
-            const audioT = chartT + offsetSec;
-
-            if (audioT >= 0 && audioT <= audioDuration) {
-              const peakIdx = Math.floor((audioT / audioDuration) * audioPeaks.length);
-              const peakVal = audioPeaks[peakIdx] || 0;
-              const h = Math.max(2, peakVal * (wfBandHeight - 2));
-              const yPeak = laneTopY + (wfBandHeight - h) / 2;
-              ctx.fillRect(px, yPeak, step, h);
-            }
-          }
-        }
-      }
-
-      // Label for Waveform
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.font = '8px sans-serif';
-      ctx.fillText('WAVEFORM', 8, laneTopY + wfBandHeight - 3);
-
-      // 4. Judgment Line & Taiko Icon
-      // Outer Judgment Ring
+      // Inner Golden Circle
       ctx.beginPath();
-      ctx.arc(judgeX, laneY + wfBandHeight / 2, laneHeight * 0.38, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.arc(judgeX, notesY, radiusStandard + 3, 0, Math.PI * 2);
+      ctx.strokeStyle = '#EAB308';
+      ctx.lineWidth = 2.0;
+      ctx.stroke();
+
+      // Center Dot Marker
+      ctx.beginPath();
+      ctx.arc(judgeX, notesY, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#94A3B8';
       ctx.fill();
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 3;
-      ctx.stroke();
 
-      // Inner Judgment Ring
-      ctx.beginPath();
-      ctx.arc(judgeX, laneY + wfBandHeight / 2, laneHeight * 0.28, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Left Taiko Drumhead Icon
-      const drumheadX = judgeX - laneHeight * 0.65;
-      if (drumheadX > 15) {
+      // Left Playback Hexagon Icon (Reference Match)
+      const hexX = judgeX - radiusBig - 22;
+      if (hexX > 20) {
+        ctx.save();
         ctx.beginPath();
-        ctx.arc(drumheadX, laneY + wfBandHeight / 2, laneHeight * 0.38, 0, Math.PI * 2);
-        ctx.fillStyle = '#E82C0C';
+        const hexR = 14;
+        for (let i = 0; i < 6; i++) {
+          const a = (i * 60 * Math.PI) / 180;
+          const hx = hexX + hexR * Math.cos(a);
+          const hy = notesY + hexR * Math.sin(a);
+          if (i === 0) ctx.moveTo(hx, hy);
+          else ctx.lineTo(hx, hy);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#334155';
         ctx.fill();
+        ctx.strokeStyle = '#94A3B8';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Inner play triangle icon inside hexagon
         ctx.beginPath();
-        ctx.arc(drumheadX, laneY + wfBandHeight / 2, laneHeight * 0.24, 0, Math.PI * 2);
+        ctx.moveTo(hexX - 3, notesY - 5);
+        ctx.lineTo(hexX + 5, notesY);
+        ctx.lineTo(hexX - 3, notesY + 5);
+        ctx.closePath();
         ctx.fillStyle = '#FFFFFF';
         ctx.fill();
+        ctx.restore();
       }
 
-      // 5. Grid Lines & Measure Barlines (Fixed layout independent of note SCROLL)
-      const currentM = timeToMeasureAndPos(currentTime, measures);
-      const currentPosVal = currentM.measureIndex + currentM.positionInMeasure;
-
+      // -------------------------------------------------------------
+      // 5. Grid Lines & Measure Barlines (SCROLL applied during play)
+      // -------------------------------------------------------------
       for (let m = 0; m < measures.length; m++) {
-        const mX = judgeX + (m - currentPosVal) * pxPerMeasure;
+        const mScroll = isPlaying ? getScrollAtPosition(m, 0, chart.events) : 1.0;
+        const mX = judgeX + (m - currentPosVal) * pxPerMeasure * mScroll;
 
         if (mX >= -100 && mX <= width + 100) {
           // Major Measure Line
           if (measures[m].barlineVisible) {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(mX, laneTopY + wfBandHeight);
+            ctx.moveTo(mX, laneTopY);
             ctx.lineTo(mX, laneTopY + laneHeight);
             ctx.stroke();
 
             // Measure Number Label
-            ctx.fillStyle = '#AAAAAA';
+            ctx.fillStyle = '#A1A1AA';
             ctx.font = 'bold 11px sans-serif';
-            ctx.fillText(`M${m + 1}`, mX + 4, laneTopY + wfBandHeight - 3);
+            ctx.fillText(`${m + 1}`, mX + 5, laneTopY + 14);
           }
 
           // Sub-grid ticks according to Snap
           const ticksCount = Math.max(4, snap);
           for (let t = 1; t < ticksCount; t++) {
-            const tickX = mX + (t / ticksCount) * pxPerMeasure;
+            const posInM = t / ticksCount;
+            const tickScroll = isPlaying ? getScrollAtPosition(m, posInM, chart.events) : 1.0;
+            const tickMVal = m + posInM;
+            const tickX = judgeX + (tickMVal - currentPosVal) * pxPerMeasure * tickScroll;
             const isQuarter = t % (ticksCount / 4) === 0;
 
             if (tickX >= -20 && tickX <= width + 20) {
               ctx.beginPath();
-              ctx.moveTo(tickX, laneTopY + wfBandHeight);
+              ctx.moveTo(tickX, laneTopY);
               ctx.lineTo(tickX, laneTopY + laneHeight);
-              ctx.strokeStyle = isQuarter ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.08)';
+              ctx.strokeStyle = isQuarter ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.08)';
               ctx.lineWidth = 1;
               ctx.stroke();
             }
@@ -256,10 +312,13 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         }
       }
 
-      // 6. Draw Events (#SCROLL, #BPMCHANGE, #GOGO) at exact fractional time position
+      // -------------------------------------------------------------
+      // 6. Draw Events (#SCROLL, #BPMCHANGE, #GOGO)
+      // -------------------------------------------------------------
       for (const ev of chart.events) {
+        const evScroll = isPlaying ? getScrollAtPosition(ev.measureIndex, ev.positionInMeasure, chart.events) : 1.0;
         const evMVal = ev.measureIndex + ev.positionInMeasure;
-        const evX = judgeX + (evMVal - currentPosVal) * pxPerMeasure;
+        const evX = judgeX + (evMVal - currentPosVal) * pxPerMeasure * evScroll;
 
         if (evX >= -50 && evX <= width + 50) {
           const color =
@@ -273,18 +332,16 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
               ? '#F43F5E'
               : '#A855F7';
 
-          // Fine vertical event marker across lane
           ctx.strokeStyle = color;
           ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.moveTo(evX, laneTopY + wfBandHeight);
+          ctx.moveTo(evX, laneTopY);
           ctx.lineTo(evX, laneTopY + laneHeight);
           ctx.stroke();
 
-          // Small badge above lane
           ctx.fillStyle = color;
           ctx.beginPath();
-          ctx.arc(evX, laneTopY - 7, 3.5, 0, Math.PI * 2);
+          ctx.arc(evX, laneTopY - 6, 3.5, 0, Math.PI * 2);
           ctx.fill();
 
           ctx.font = '9px sans-serif';
@@ -292,7 +349,9 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         }
       }
 
+      // -------------------------------------------------------------
       // 7. Active Pending Roll Start Point Line
+      // -------------------------------------------------------------
       if (rollStartPoint) {
         const rollStartMVal = rollStartPoint.measureIndex + rollStartPoint.positionInMeasure;
         const rollStartX = judgeX + (rollStartMVal - currentPosVal) * pxPerMeasure;
@@ -311,12 +370,9 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         ctx.fillText('連打開始点', rollStartX + 4, laneTopY - 14);
       }
 
+      // -------------------------------------------------------------
       // 8. Hit Sound Scheduler & Notes Rendering
-      const notesY = laneY + wfBandHeight / 2;
-      const radiusStandard = 15; // 30px standard note
-      const radiusBig = 20; // ~1.33x big note (40px)
-
-      // Precise hit sound trigger during playback frame
+      // -------------------------------------------------------------
       if (isPlaying) {
         const fromT = lastTimeRef.current;
         const toT = currentTime;
@@ -324,9 +380,10 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         if (toT > fromT) {
           for (const note of chart.notes) {
             if (note.type === 0) continue;
+            const nTime = measureAndPosToTime(note.measureIndex, note.positionInMeasure, measures);
             if (
-              note.timeSeconds >= fromT - 0.01 &&
-              note.timeSeconds <= toT + 0.015 &&
+              nTime >= fromT - 0.015 &&
+              nTime <= toT + 0.015 &&
               !playedNoteIdsRef.current.has(note.id)
             ) {
               playedNoteIdsRef.current.add(note.id);
@@ -337,36 +394,59 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         lastTimeRef.current = currentTime;
       }
 
-      for (const note of chart.notes) {
-        if (note.type === 0) continue;
+      // Notes ordered front-to-back (near judgeX rendered on top)
+      const renderNotes = [...chart.notes]
+        .filter((n) => n.type !== 0)
+        .sort((a, b) => {
+          const posA = a.measureIndex + a.positionInMeasure;
+          const posB = b.measureIndex + b.positionInMeasure;
+          return posB - posA;
+        });
 
-        // In Edit Mode, note density/spacing is kept uniform (Beat Position based).
-        // In Play Mode, #SCROLL alters note display speed.
-        const noteMeasure = measures[note.measureIndex] || activeMeasure;
-        const noteScroll = noteMeasure.scroll || 1.0;
+      for (const note of renderNotes) {
+        const noteTime = measureAndPosToTime(note.measureIndex, note.positionInMeasure, measures);
+        const noteScroll = getScrollAtPosition(note.measureIndex, note.positionInMeasure, chart.events);
         const effectiveScroll = isPlaying ? noteScroll : 1.0;
 
         const noteMVal = note.measureIndex + note.positionInMeasure;
         const noteX = judgeX + (noteMVal - currentPosVal) * pxPerMeasure * effectiveScroll;
 
-        if (noteX >= -100 && noteX <= width + 100) {
+        if (noteX >= -120 && noteX <= width + 120) {
           const isSelected = selectedNoteIds.includes(note.id);
-          const r = note.type === 3 || note.type === 4 || note.type === 6 ? radiusBig : radiusStandard;
+          const isBig = note.type === 3 || note.type === 4 || note.type === 6;
+          const r = isBig ? radiusBig : radiusStandard;
 
           // Draw long roll / balloon body
           if (note.type === 5 || note.type === 6 || note.type === 7) {
             const duration = note.durationSeconds || 0.5;
-            const endM = timeToMeasureAndPos(note.timeSeconds + duration, measures);
+            const endM = timeToMeasureAndPos(noteTime + duration, measures);
             const endMVal = endM.measureIndex + endM.positionInMeasure;
-            const endX = judgeX + (endMVal - currentPosVal) * pxPerMeasure * effectiveScroll;
+            const endScroll = getScrollAtPosition(endM.measureIndex, endM.positionInMeasure, chart.events);
+            const effectiveEndScroll = isPlaying ? endScroll : 1.0;
+            const endX = judgeX + (endMVal - currentPosVal) * pxPerMeasure * effectiveEndScroll;
 
-            ctx.fillStyle = note.type === 7 ? 'rgba(255, 136, 0, 0.85)' : 'rgba(255, 204, 0, 0.85)';
-            ctx.fillRect(noteX, notesY - r, Math.max(12, endX - noteX), r * 2);
-
+            const bodyColor = note.type === 7 ? '#FB923C' : '#FACC15';
+            ctx.fillStyle = bodyColor;
+            
+            // Capsule body shape
             ctx.beginPath();
-            ctx.arc(endX, notesY, r, 0, Math.PI * 2);
+            ctx.arc(noteX, notesY, r, Math.PI / 2, -Math.PI / 2);
+            ctx.lineTo(endX, notesY - r);
+            ctx.arc(endX, notesY, r, -Math.PI / 2, Math.PI / 2);
+            ctx.closePath();
             ctx.fill();
+
             ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+
+            // Inner white body line
+            ctx.beginPath();
+            ctx.arc(noteX, notesY, r * 0.65, Math.PI / 2, -Math.PI / 2);
+            ctx.lineTo(endX, notesY - r * 0.65);
+            ctx.arc(endX, notesY, r * 0.65, -Math.PI / 2, Math.PI / 2);
+            ctx.closePath();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
             ctx.lineWidth = 1.5;
             ctx.stroke();
           }
@@ -375,32 +455,68 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
           ctx.beginPath();
           ctx.arc(noteX, notesY, r, 0, Math.PI * 2);
 
+          let noteColor = '#F04C28';
+          let innerDarkColor = '#991B1B';
+
           switch (note.type) {
             case 1:
             case 3:
-              ctx.fillStyle = '#FF3B30';
+              noteColor = '#F04C28';
+              innerDarkColor = '#991B1B';
               break;
             case 2:
             case 4:
-              ctx.fillStyle = '#00A2FF';
+              noteColor = '#38BDF8';
+              innerDarkColor = '#0369A1';
               break;
             case 5:
             case 6:
-              ctx.fillStyle = '#FFCC00';
+              noteColor = '#FACC15';
+              innerDarkColor = '#CA8A04';
               break;
             case 7:
-              ctx.fillStyle = '#FF8800';
+              noteColor = '#FB923C';
+              innerDarkColor = '#C2410C';
               break;
-            default:
-              ctx.fillStyle = '#CCCCCC';
+            case 8:
+              noteColor = '#FACC15';
+              innerDarkColor = '#CA8A04';
+              break;
           }
+
+          ctx.fillStyle = noteColor;
           ctx.fill();
 
           ctx.strokeStyle = isSelected ? '#FFFFFF' : '#000000';
-          ctx.lineWidth = isSelected ? 3 : 2;
+          ctx.lineWidth = isSelected ? 3.5 : 2.5;
           ctx.stroke();
 
-          // Highlight selection
+          // Inner white detail ring for DON / KAT
+          if (note.type === 1 || note.type === 2 || note.type === 3 || note.type === 4) {
+            ctx.beginPath();
+            ctx.arc(noteX, notesY, r * 0.66, 0, Math.PI * 2);
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = isBig ? 2.5 : 2.0;
+            ctx.stroke();
+
+            // Authentic Tomoe (3-Swirl Emblem) in center for genuine Taiko aesthetic
+            ctx.save();
+            ctx.fillStyle = innerDarkColor;
+            const tomoeR = r * 0.32;
+            for (let i = 0; i < 3; i++) {
+              const angle = (i * 120 * Math.PI) / 180;
+              ctx.save();
+              ctx.translate(noteX, notesY);
+              ctx.rotate(angle);
+              ctx.beginPath();
+              ctx.arc(0, -tomoeR * 0.6, tomoeR * 0.55, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.restore();
+            }
+            ctx.restore();
+          }
+
+          // Highlight selection ring
           if (isSelected) {
             ctx.beginPath();
             ctx.arc(noteX, notesY, r + 4, 0, Math.PI * 2);
@@ -411,21 +527,16 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         }
       }
 
-      // HUD overlay info
-      if (isGogo) {
-        ctx.fillStyle = '#FFCC00';
-        ctx.font = 'italic bold 12px sans-serif';
-        ctx.fillText('ゴーゴータイム', width - 95, 20);
-      }
-
+      ctx.restore();
       animId = requestAnimationFrame(render);
     };
 
     const handleResize = () => {
       const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
       if (rect.width > 0 && rect.height > 0) {
-        canvas.width = rect.width;
-        canvas.height = rect.height;
+        canvas.width = Math.round(rect.width * dpr);
+        canvas.height = Math.round(rect.height * dpr);
       }
     };
 
@@ -491,8 +602,7 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       // Single Tap Action -> Add or Delete Note at tap location
       const rect = canvas.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
-      const width = rect.width;
-      const judgeX = Math.max(90, width * 0.18);
+      const judgeX = 180;
 
       const deltaX = clickX - judgeX;
       const deltaMeasures = deltaX / pxPerMeasure;

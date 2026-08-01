@@ -38,54 +38,71 @@ export function exportToTja(chart: TaikoChart): string {
   });
 
   for (let m = 0; m <= maxMeasure; m++) {
-    // 1. Output events at start of measure or inside measure
     const measureEvents = chart.events.filter((e) => e.measureIndex === m);
-    for (const ev of measureEvents) {
-      switch (ev.type) {
-        case 'BPMCHANGE':
-          lines.push(`#BPMCHANGE ${ev.value}`);
-          break;
-        case 'MEASURE':
-          lines.push(`#MEASURE ${ev.numerator || 4}/${ev.denominator || 4}`);
-          break;
-        case 'SCROLL':
-          lines.push(`#SCROLL ${ev.value}`);
-          break;
-        case 'DELAY':
-          lines.push(`#DELAY ${ev.value}`);
-          break;
-        case 'GOGOSTART':
-          lines.push('#GOGOSTART');
-          break;
-        case 'GOGOEND':
-          lines.push('#GOGOEND');
-          break;
-        case 'BARLINEON':
-          lines.push('#BARLINEON');
-          break;
-        case 'BARLINEOFF':
-          lines.push('#BARLINEOFF');
-          break;
-        case 'LYRIC':
-          lines.push(`#LYRIC ${ev.text || ''}`);
-          break;
-      }
-    }
-
-    // 2. Build note string for measure m
     const measureNotes = chart.notes.filter((n) => n.measureIndex === m);
 
+    // Format an event command string
+    const formatEventLine = (ev: (typeof measureEvents)[0]): string => {
+      switch (ev.type) {
+        case 'BPMCHANGE':
+          return `#BPMCHANGE ${ev.value}`;
+        case 'MEASURE':
+          return `#MEASURE ${ev.numerator || 4}/${ev.denominator || 4}`;
+        case 'SCROLL':
+          return `#SCROLL ${ev.value}`;
+        case 'DELAY':
+          return `#DELAY ${ev.value}`;
+        case 'GOGOSTART':
+          return '#GOGOSTART';
+        case 'GOGOEND':
+          return '#GOGOEND';
+        case 'BARLINEON':
+          return '#BARLINEON';
+        case 'BARLINEOFF':
+          return '#BARLINEOFF';
+        case 'LYRIC':
+          return `#LYRIC ${ev.text || ''}`;
+        default:
+          return '';
+      }
+    };
+
     if (measureNotes.length === 0) {
-      lines.push('0000,');
+      // Check if any events are positioned inside the measure (> 0)
+      const hasIntraEvents = measureEvents.some((e) => e.positionInMeasure > 0.01);
+
+      if (!hasIntraEvents) {
+        for (const ev of measureEvents) {
+          const line = formatEventLine(ev);
+          if (line) lines.push(line);
+        }
+        lines.push('0000,');
+      } else {
+        // Build 16th grid for measure without notes but with intra-measure events
+        const targetLen = 16;
+        const grid = new Array(targetLen).fill('0');
+
+        for (let i = 0; i < targetLen; i++) {
+          const eventsAtI = measureEvents.filter((ev) => {
+            const idx = Math.min(targetLen - 1, Math.round(ev.positionInMeasure * targetLen));
+            return idx === i;
+          });
+          for (const ev of eventsAtI) {
+            const line = formatEventLine(ev);
+            if (line) lines.push(line);
+          }
+          lines.push(grid[i]);
+        }
+        lines.push(',');
+      }
     } else {
-      // Determine resolution needed (e.g. 4, 8, 12, 16, 24, 32, 48)
-      let targetLen = 16; // default 16th notes
-      // Check if any note requires higher resolution
+      // Determine resolution (default 16, or 48 if required)
+      let targetLen = 16;
       for (const n of measureNotes) {
         const p = n.positionInMeasure;
         if (Math.abs(p * 48 - Math.round(p * 48)) < 0.001) {
           if (Math.abs(p * 16 - Math.round(p * 16)) > 0.001) {
-            targetLen = 48; // 48th notes required
+            targetLen = 48;
           }
         }
       }
@@ -96,7 +113,31 @@ export function exportToTja(chart: TaikoChart): string {
         grid[idx] = String(n.type);
       }
 
-      lines.push(grid.join('') + ',');
+      let currentLineBuffer = '';
+      for (let i = 0; i < targetLen; i++) {
+        const eventsAtI = measureEvents.filter((ev) => {
+          const idx = Math.min(targetLen - 1, Math.round(ev.positionInMeasure * targetLen));
+          return idx === i;
+        });
+
+        if (eventsAtI.length > 0) {
+          if (currentLineBuffer) {
+            lines.push(currentLineBuffer);
+            currentLineBuffer = '';
+          }
+          for (const ev of eventsAtI) {
+            const line = formatEventLine(ev);
+            if (line) lines.push(line);
+          }
+        }
+        currentLineBuffer += grid[i];
+      }
+
+      if (currentLineBuffer) {
+        lines.push(currentLineBuffer + ',');
+      } else {
+        lines.push(',');
+      }
     }
   }
 

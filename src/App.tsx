@@ -56,7 +56,6 @@ export default function App() {
   const [snap, setSnap] = useState<SnapValue>(16);
   const [zoom, setZoom] = useState<ZoomValue>(1.0);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
-  const [renderMode, setRenderMode] = useState<'edit' | 'play'>('edit');
 
   // Playback & Audio State
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -233,7 +232,7 @@ export default function App() {
       await audioEngine.loadAudioFile(file);
       setIsAudioLoaded(true);
       setAudioFileName(file.name);
-      const peaks = audioEngine.getWaveformPeaks(1000);
+      const peaks = audioEngine.getWaveformPeaks(30000);
       setAudioPeaks(peaks);
       setToastMessage({ text: `音源「${file.name}」を読み込みました！`, isError: false });
       setTimeout(() => setToastMessage(null), 3000);
@@ -379,8 +378,6 @@ export default function App() {
       <Header
         chart={chart}
         isPlaying={isPlaying}
-        renderMode={renderMode}
-        onToggleRenderMode={() => setRenderMode(renderMode === 'edit' ? 'play' : 'edit')}
         onTogglePlay={togglePlay}
         onStop={handleStop}
         onOpenProjectModal={() => setProjectModalOpen(true)}
@@ -406,7 +403,6 @@ export default function App() {
           measures={measures}
           currentTime={currentTime}
           isPlaying={isPlaying}
-          renderMode={renderMode}
           onSeek={handleSeekTime}
           selectedNoteType={selectedNoteType}
           snap={snap}

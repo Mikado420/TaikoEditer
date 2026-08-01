@@ -12,16 +12,12 @@ import {
   FileText,
   Sliders,
   FileCode,
-  Eye,
-  Edit3,
 } from 'lucide-react';
 import { TaikoChart } from '../types/chart';
 
 interface HeaderProps {
   chart: TaikoChart;
   isPlaying: boolean;
-  renderMode: 'edit' | 'play';
-  onToggleRenderMode: () => void;
   onTogglePlay: () => void;
   onStop: () => void;
   onOpenProjectModal: () => void;
@@ -43,8 +39,6 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   chart,
   isPlaying,
-  renderMode,
-  onToggleRenderMode,
   onTogglePlay,
   onStop,
   onOpenProjectModal,
@@ -131,22 +125,8 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
       </div>
 
-      {/* Middle: Playback & Render Mode Switcher */}
+      {/* Middle: Playback Controls */}
       <div className="flex items-center gap-1.5 shrink-0">
-        {/* Render Mode Switcher */}
-        <button
-          onClick={onToggleRenderMode}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition active:scale-95 ${
-            renderMode === 'play'
-              ? 'bg-rose-950/80 border-rose-600 text-rose-300'
-              : 'bg-sky-950/80 border-sky-600 text-sky-300'
-          }`}
-          title={renderMode === 'play' ? '演奏モード（演出重視）' : '編集モード（一定間隔描画）'}
-        >
-          {renderMode === 'play' ? <Eye size={13} /> : <Edit3 size={13} />}
-          <span>{renderMode === 'play' ? '演奏' : '編集'}</span>
-        </button>
-
         <button
           onClick={onTogglePlay}
           className={`flex items-center gap-1 px-3 py-1 rounded-lg font-bold text-white shadow transition active:scale-95 text-[11px] ${

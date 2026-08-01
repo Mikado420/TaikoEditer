@@ -28,20 +28,14 @@ export function calculateMeasures(
   let currentBarline = true;
   let currentGogo = false;
 
-  // Chart start time in seconds (TJA OFFSET is subtracted or negated depending on standard)
-  // Usually in TJA OFFSET: -X means audio starts at offset X.
+  // Chart start time in seconds (TJA OFFSET: -X means measure 0 starts at +X seconds in audio)
   let currentTime = -header.offset;
 
   for (let m = 0; m < totalMeasures; m++) {
     // Collect events in this measure
     const measureEvents = sortedEvents.filter((e) => e.measureIndex === m);
 
-    // Calculate measure length at start of measure
     let measureBeats = (currentNum / currentDen) * 4;
-    let secondsPerBeat = 60 / currentBpm;
-    let measureDuration = measureBeats * secondsPerBeat;
-
-    // Check if there are BPMCHANGE or MEASURE events inside this measure
     let lastPos = 0;
     let accumulatedDuration = 0;
 
@@ -98,17 +92,32 @@ export function calculateMeasures(
 }
 
 /**
- * Converts a measure index and 0..1 position to absolute time in seconds.
+ * Converts a measure index and position (or float measure value) to absolute time in seconds.
  */
 export function measureAndPosToTime(
   measureIndex: number,
   positionInMeasure: number,
   measures: MeasureInfo[]
 ): number {
-  if (measures.length === 0) return 0;
-  const mIndex = Math.max(0, Math.min(measures.length - 1, Math.floor(measureIndex)));
-  const m = measures[mIndex];
-  const pos = Math.max(0, Math.min(1.0, positionInMeasure));
+  if (!measures || measures.length === 0) return 0;
+
+  const totalMVal = measureIndex + positionInMeasure;
+
+  if (totalMVal <= 0) {
+    const m0 = measures[0];
+    return m0.timeSeconds + totalMVal * m0.durationSeconds;
+  }
+
+  const mIdx = Math.floor(totalMVal);
+  const pos = totalMVal - mIdx;
+
+  if (mIdx >= measures.length) {
+    const lastM = measures[measures.length - 1];
+    const extraM = totalMVal - lastM.index;
+    return lastM.timeSeconds + extraM * lastM.durationSeconds;
+  }
+
+  const m = measures[mIdx];
   return m.timeSeconds + pos * m.durationSeconds;
 }
 
@@ -119,13 +128,13 @@ export function timeToMeasureAndPos(
   timeSeconds: number,
   measures: MeasureInfo[]
 ): { measureIndex: number; positionInMeasure: number } {
-  if (measures.length === 0) return { measureIndex: 0, positionInMeasure: 0 };
+  if (!measures || measures.length === 0) return { measureIndex: 0, positionInMeasure: 0 };
 
-  if (timeSeconds <= measures[0].timeSeconds) {
-    const m = measures[0];
-    const diff = timeSeconds - m.timeSeconds;
-    const pos = diff / m.durationSeconds;
-    return { measureIndex: 0, positionInMeasure: Math.max(-10, pos) };
+  const m0 = measures[0];
+  if (timeSeconds <= m0.timeSeconds) {
+    const diff = timeSeconds - m0.timeSeconds;
+    const pos = diff / m0.durationSeconds;
+    return { measureIndex: 0, positionInMeasure: pos };
   }
 
   for (let i = 0; i < measures.length; i++) {
@@ -169,3 +178,31 @@ export function formatTimeString(seconds: number): string {
 
   return `${mStr}:${sStr}.${msStr}`;
 }
+
+/**
+ * Calculates the active SCROLL multiplier at a specific beat position (measureIndex + positionInMeasure).
+ * Uses absolute beat position to ensure SCROLL is applied per-note rather than per-measure.
+ */
+export function getScrollAtPosition(
+  measureIndex: number,
+  positionInMeasure: number,
+  events: ChartEvent[]
+): number {
+  if (!events || events.length === 0) return 1.0;
+  const targetPos = measureIndex + positionInMeasure;
+  let activeScroll = 1.0;
+  let maxMatchedPos = -1;
+
+  for (const ev of events) {
+    if (ev.type === 'SCROLL' && ev.value !== undefined) {
+      const evPos = ev.measureIndex + ev.positionInMeasure;
+      if (evPos <= targetPos && evPos >= maxMatchedPos) {
+        maxMatchedPos = evPos;
+        activeScroll = ev.value;
+      }
+    }
+  }
+
+  return activeScroll;
+}
+
