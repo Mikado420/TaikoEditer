@@ -11,8 +11,11 @@ import { calculateMeasures } from './utils/timeMath';
 import { exportToTja } from './parser/tjaExporter';
 import { audioEngine } from './audio/audioEngine';
 import {
+  deleteAudioFromDb,
   deleteChartFromDb,
+  getAudioFromDb,
   getAllChartsFromDb,
+  saveAudioToDb,
   saveChartToDb,
 } from './storage/db';
 import { initAutoSave, triggerSave } from './storage/autoSave';
@@ -53,7 +56,28 @@ export default function App() {
 
   // Editor UI State
   const [selectedNoteType, setSelectedNoteType] = useState<NoteType>(1);
-  const [snap, setSnap] = useState<SnapValue>(16);
+  const [snap, setSnapState] = useState<SnapValue>(() => {
+    try {
+      const saved = localStorage.getItem('taiko_editor_snap');
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed > 0 && parsed <= 192) return parsed;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return 16;
+  });
+
+  const handleSnapChange = (newSnap: SnapValue) => {
+    const validSnap = Math.max(1, Math.min(192, Math.round(newSnap)));
+    setSnapState(validSnap);
+    try {
+      localStorage.setItem('taiko_editor_snap', validSnap.toString());
+    } catch (e) {
+      console.error(e);
+    }
+  };
   const [zoom, setZoom] = useState<ZoomValue>(1.0);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
 
@@ -126,15 +150,43 @@ export default function App() {
     return () => window.removeEventListener('swUpdateAvailable', handleSwUpdate);
   }, []);
 
-  // Load IndexedDB charts on boot
+  // Restore audio file from IndexedDB for a given chart ID
+  const restoreAudioForChart = async (chartId: string) => {
+    try {
+      const audioData = await getAudioFromDb(chartId);
+      if (audioData && audioData.blob) {
+        const file = new File([audioData.blob], audioData.fileName, {
+          type: audioData.blob.type || 'audio/mpeg',
+        });
+        await audioEngine.loadAudioFile(file);
+        setIsAudioLoaded(true);
+        setAudioFileName(audioData.fileName);
+        setAudioPeaks(audioEngine.getWaveformPeaks(30000));
+        return true;
+      }
+    } catch (err) {
+      console.error('Failed to restore audio from IndexedDB:', err);
+    }
+    audioEngine.clearAudio();
+    setIsAudioLoaded(false);
+    setAudioFileName(null);
+    setAudioPeaks(null);
+    return false;
+  };
+
+  // Load IndexedDB charts on boot and restore audio automatically
   useEffect(() => {
-    getAllChartsFromDb().then((charts) => {
+    getAllChartsFromDb().then(async (charts) => {
       setDbCharts(charts);
+      let targetChart = SAMPLE_CHARTS[0];
       if (charts.length > 0) {
-        setChart(charts[0]);
-        setHistory([charts[0]]);
+        const activeId = localStorage.getItem('taiko_editor_active_chart_id');
+        targetChart = (activeId && charts.find((c) => c.id === activeId)) || charts[0];
+        setChart(targetChart);
+        setHistory([targetChart]);
         setHistoryIdx(0);
       }
+      await restoreAudioForChart(targetChart.id);
     });
 
     const handleBeforeInstall = (e: Event) => {
@@ -226,19 +278,65 @@ export default function App() {
     audioEngine.setPlaybackRate(speed);
   };
 
-  // File Import Handlers
-  const handleLoadAudio = async (file: File) => {
+  // File Import Handlers & Audio Storage
+  const handleLoadAudio = async (file: File, targetChartId?: string) => {
+    const cid = targetChartId || chart.id;
     try {
       await audioEngine.loadAudioFile(file);
       setIsAudioLoaded(true);
       setAudioFileName(file.name);
       const peaks = audioEngine.getWaveformPeaks(30000);
       setAudioPeaks(peaks);
-      setToastMessage({ text: `音源「${file.name}」を読み込みました！`, isError: false });
+
+      // Persist audio blob into IndexedDB
+      await saveAudioToDb(cid, file, file.name);
+
+      // Save wave filename reference to chart header if missing or changed
+      if (chart.header.wave !== file.name) {
+        const updatedChart: TaikoChart = {
+          ...chart,
+          header: { ...chart.header, wave: file.name },
+          audioFileName: file.name,
+        };
+        setChart(updatedChart);
+        saveChartToDb(updatedChart);
+      }
+
+      setToastMessage({
+        text: `音源「${file.name}」を永続保存しました！次回も自動復元されます`,
+        isError: false,
+      });
       setTimeout(() => setToastMessage(null), 3000);
     } catch (e: any) {
       setToastMessage({ text: `音源読込エラー: ${e.message}`, isError: true });
       setTimeout(() => setToastMessage(null), 4000);
+    }
+  };
+
+  const handleDeleteAudio = async () => {
+    try {
+      await deleteAudioFromDb(chart.id);
+      audioEngine.clearAudio();
+      setIsAudioLoaded(false);
+      setAudioFileName(null);
+      setAudioPeaks(null);
+
+      const updatedChart: TaikoChart = {
+        ...chart,
+        header: { ...chart.header, wave: '' },
+        audioFileName: null,
+      };
+      setChart(updatedChart);
+      saveChartToDb(updatedChart);
+
+      setToastMessage({
+        text: '音源ファイルを削除しました。再読込する場合は音源ボタンから選択してください。',
+        isError: false,
+      });
+      setTimeout(() => setToastMessage(null), 3500);
+    } catch (e: any) {
+      setToastMessage({ text: `音源削除エラー: ${e.message}`, isError: true });
+      setTimeout(() => setToastMessage(null), 3000);
     }
   };
 
@@ -250,26 +348,34 @@ export default function App() {
       return;
     }
 
+    let activeChartId = chart.id;
     if (result.chart) {
+      activeChartId = result.chart.id;
       updateChartWithHistory(result.chart);
-      saveChartToDb(result.chart);
+      await saveChartToDb(result.chart);
+      try {
+        localStorage.setItem('taiko_editor_active_chart_id', result.chart.id);
+      } catch (e) {}
       getAllChartsFromDb().then(setDbCharts);
     }
 
     if (result.audioFile) {
-      await handleLoadAudio(result.audioFile);
+      await handleLoadAudio(result.audioFile, activeChartId);
+    } else if (result.chart) {
+      await restoreAudioForChart(result.chart.id);
     }
 
     const message =
       result.chart && result.audioFile
-        ? '譜面と音源を読み込みました！'
+        ? '譜面と音源を読み込み永続保存しました！'
         : result.chart
         ? '譜面データを読み込みました！'
-        : '音源ファイルを読み込みました！';
+        : '音源ファイルを読み込み永続保存しました！';
 
     setToastMessage({ text: message, isError: false });
     setTimeout(() => setToastMessage(null), 3500);
   };
+
 
   const handleExportTja = () => {
     const tjaString = exportToTja(chart);
@@ -386,6 +492,7 @@ export default function App() {
         onImportFile={handleImportFile}
         onExportTja={handleExportTja}
         onLoadAudio={handleLoadAudio}
+        onDeleteAudio={handleDeleteAudio}
         isAudioLoaded={isAudioLoaded}
         audioFileName={audioFileName}
         pwaPrompt={pwaPrompt}
@@ -395,6 +502,7 @@ export default function App() {
         rightPanelOpen={rightPanelOpen}
         onToggleRightPanel={() => setRightPanelOpen(!rightPanelOpen)}
       />
+
 
       {/* 2. Main Workstation Area: Single Unified Editing Canvas */}
       <main className="flex-1 flex flex-col overflow-hidden relative w-full h-full">
@@ -446,7 +554,7 @@ export default function App() {
         isPlaying={isPlaying}
         onTogglePlay={togglePlay}
         snap={snap}
-        onChangeSnap={setSnap}
+        onChangeSnap={handleSnapChange}
         zoom={zoom}
         onChangeZoom={setZoom}
         playbackSpeed={playbackSpeed}
@@ -471,21 +579,39 @@ export default function App() {
         onClose={() => setProjectModalOpen(false)}
         charts={dbCharts}
         currentChartId={chart.id}
-        onSelectChart={(selected) => {
+        onSelectChart={async (selected) => {
           setChart(selected);
+          try {
+            localStorage.setItem('taiko_editor_active_chart_id', selected.id);
+          } catch (e) {}
           setHistory([selected]);
           setHistoryIdx(0);
+          await restoreAudioForChart(selected.id);
         }}
-        onCreateNewChart={() => {
+        onCreateNewChart={async () => {
           const newChart = createBlankChart();
           setChart(newChart);
+          try {
+            localStorage.setItem('taiko_editor_active_chart_id', newChart.id);
+          } catch (e) {}
           setHistory([newChart]);
           setHistoryIdx(0);
-          saveChartToDb(newChart);
+          await saveChartToDb(newChart);
           getAllChartsFromDb().then(setDbCharts);
+          await restoreAudioForChart(newChart.id);
         }}
         onDeleteChart={(id) => {
-          deleteChartFromDb(id).then(() => getAllChartsFromDb().then(setDbCharts));
+          deleteChartFromDb(id).then(async () => {
+            const updated = await getAllChartsFromDb();
+            setDbCharts(updated);
+            if (id === chart.id) {
+              const remaining = updated.length > 0 ? updated[0] : SAMPLE_CHARTS[0];
+              setChart(remaining);
+              setHistory([remaining]);
+              setHistoryIdx(0);
+              await restoreAudioForChart(remaining.id);
+            }
+          });
         }}
       />
 

@@ -70,6 +70,8 @@ export interface MeasureInfo {
   denominator: number;
   barlineVisible: boolean;
   isGogo: boolean;
+  startMeasurePos: number; // cumulative start position in standard 4/4 measure units
+  measureLengthRatio: number; // numerator / denominator (e.g. 4/4 = 1.0, 3/4 = 0.75, 7/8 = 0.875)
 }
 
 export interface TaikoChart {

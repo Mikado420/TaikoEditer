@@ -30,6 +30,7 @@ export function calculateMeasures(
 
   // Chart start time in seconds (TJA OFFSET: -X means measure 0 starts at +X seconds in audio)
   let currentTime = -header.offset;
+  let cumulativeMeasurePos = 0;
 
   for (let m = 0; m < totalMeasures; m++) {
     // Collect events in this measure
@@ -73,6 +74,8 @@ export function calculateMeasures(
       accumulatedDuration += remainingPos * measureBeats * (60 / currentBpm);
     }
 
+    const measureRatio = currentNum / currentDen;
+
     measures.push({
       index: m,
       timeSeconds: currentTime,
@@ -83,12 +86,80 @@ export function calculateMeasures(
       denominator: currentDen,
       barlineVisible: currentBarline,
       isGogo: currentGogo,
+      startMeasurePos: cumulativeMeasurePos,
+      measureLengthRatio: measureRatio,
     });
 
     currentTime += accumulatedDuration;
+    cumulativeMeasurePos += measureRatio;
   }
 
   return measures;
+}
+
+/**
+ * Calculates the absolute cumulative position (in 4/4 standard measure units)
+ * for a given measure index and position within measure.
+ */
+export function getAbsoluteMeasurePos(
+  measureIndex: number,
+  positionInMeasure: number,
+  measures: MeasureInfo[]
+): number {
+  if (!measures || measures.length === 0) return measureIndex + positionInMeasure;
+
+  if (measureIndex < 0) {
+    const ratio0 = measures[0]?.measureLengthRatio || 1.0;
+    return (measureIndex + positionInMeasure) * ratio0;
+  }
+
+  if (measureIndex >= measures.length) {
+    const lastM = measures[measures.length - 1];
+    const extraMeasureCount = measureIndex - lastM.index;
+    const extraPos = extraMeasureCount + positionInMeasure;
+    return lastM.startMeasurePos + extraPos * lastM.measureLengthRatio;
+  }
+
+  const m = measures[measureIndex];
+  return m.startMeasurePos + positionInMeasure * m.measureLengthRatio;
+}
+
+/**
+ * Converts an absolute cumulative position (in 4/4 measure units) back to measure index and positionInMeasure.
+ */
+export function absMeasurePosToMeasureAndPos(
+  absPos: number,
+  measures: MeasureInfo[]
+): { measureIndex: number; positionInMeasure: number } {
+  if (!measures || measures.length === 0) {
+    const mIdx = Math.max(0, Math.floor(absPos));
+    const pos = Math.max(0, Math.min(1.0, absPos - mIdx));
+    return { measureIndex: mIdx, positionInMeasure: pos };
+  }
+
+  if (absPos <= 0) {
+    return { measureIndex: 0, positionInMeasure: 0 };
+  }
+
+  for (let i = 0; i < measures.length; i++) {
+    const m = measures[i];
+    const endPos = m.startMeasurePos + m.measureLengthRatio;
+    if (absPos >= m.startMeasurePos && absPos < endPos) {
+      const pos = (absPos - m.startMeasurePos) / m.measureLengthRatio;
+      return { measureIndex: i, positionInMeasure: Math.max(0, Math.min(1.0, pos)) };
+    }
+  }
+
+  const lastM = measures[measures.length - 1];
+  const endLast = lastM.startMeasurePos + lastM.measureLengthRatio;
+  const extraAbs = absPos - endLast;
+  const extraCount = Math.floor(extraAbs / lastM.measureLengthRatio);
+  const remPos = (extraAbs % lastM.measureLengthRatio) / lastM.measureLengthRatio;
+
+  return {
+    measureIndex: lastM.index + 1 + extraCount,
+    positionInMeasure: Math.max(0, Math.min(1.0, remPos)),
+  };
 }
 
 /**
@@ -155,11 +226,17 @@ export function timeToMeasureAndPos(
 }
 
 /**
- * Snaps a 0..1 position within a measure according to the snap fraction.
+ * Snaps a 0..1 position within a measure according to the snap fraction and time signature.
  */
-export function snapPosition(positionInMeasure: number, snap: SnapValue): number {
+export function snapPosition(
+  positionInMeasure: number,
+  snap: SnapValue,
+  numerator = 4,
+  denominator = 4
+): number {
   if (!snap || snap <= 0) return positionInMeasure;
-  const snapped = Math.round(positionInMeasure * snap) / snap;
+  const ticksInMeasure = Math.max(numerator, Math.round(snap * (numerator / denominator)));
+  const snapped = Math.round(positionInMeasure * ticksInMeasure) / ticksInMeasure;
   return Math.max(0, Math.min(1.0, snapped));
 }
 
@@ -205,4 +282,79 @@ export function getScrollAtPosition(
 
   return activeScroll;
 }
+
+export interface GogoInterval {
+  startAbsPos: number;
+  endAbsPos: number;
+}
+
+/**
+ * Returns all Gogo intervals in terms of absolute measure units [startAbsPos, endAbsPos].
+ */
+export function getGogoIntervals(
+  events: ChartEvent[],
+  measures: MeasureInfo[]
+): GogoInterval[] {
+  const gogoEvents = (events || [])
+    .filter((e) => e.type === 'GOGOSTART' || e.type === 'GOGOEND')
+    .map((e) => ({
+      type: e.type,
+      absPos: getAbsoluteMeasurePos(e.measureIndex, e.positionInMeasure, measures),
+    }))
+    .sort((a, b) => a.absPos - b.absPos);
+
+  if (gogoEvents.length > 0) {
+    const intervals: GogoInterval[] = [];
+    let currentStart: number | null = null;
+
+    for (const ev of gogoEvents) {
+      if (ev.type === 'GOGOSTART') {
+        if (currentStart === null) {
+          currentStart = ev.absPos;
+        }
+      } else if (ev.type === 'GOGOEND') {
+        if (currentStart !== null) {
+          intervals.push({ startAbsPos: currentStart, endAbsPos: ev.absPos });
+          currentStart = null;
+        }
+      }
+    }
+
+    if (currentStart !== null) {
+      const maxAbs =
+        measures.length > 0
+          ? measures[measures.length - 1].startMeasurePos +
+            measures[measures.length - 1].measureLengthRatio
+          : 999;
+      intervals.push({ startAbsPos: currentStart, endAbsPos: maxAbs });
+    }
+
+    return intervals;
+  }
+
+  const intervals: GogoInterval[] = [];
+  let currentStart: number | null = null;
+  let currentEnd = 0;
+
+  for (const m of measures) {
+    if (m.isGogo) {
+      if (currentStart === null) {
+        currentStart = m.startMeasurePos;
+      }
+      currentEnd = m.startMeasurePos + m.measureLengthRatio;
+    } else {
+      if (currentStart !== null) {
+        intervals.push({ startAbsPos: currentStart, endAbsPos: currentEnd });
+        currentStart = null;
+      }
+    }
+  }
+
+  if (currentStart !== null) {
+    intervals.push({ startAbsPos: currentStart, endAbsPos: currentEnd });
+  }
+
+  return intervals;
+}
+
 

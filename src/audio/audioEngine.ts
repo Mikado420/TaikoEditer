@@ -86,7 +86,8 @@ export class AudioEngine {
           const res = await fetch(url);
           if (res.ok) {
             const buf = await res.arrayBuffer();
-            return await ctx.decodeAudioData(buf);
+            // Create a copy of array buffer for decodeAudioData as it detaches the buffer
+            return await ctx.decodeAudioData(buf.slice(0));
           }
         } catch (_) {
           /* try next url */
@@ -97,19 +98,87 @@ export class AudioEngine {
 
     try {
       const [dong, ka, balloon] = await Promise.all([
-        loadSound(['/sounds/dong.wav', '/dong.wav']),
-        loadSound(['/sounds/ka.wav', '/ka.wav']),
-        loadSound(['/sounds/balloon.wav', '/balloon.wav']),
+        loadSound(['/sounds/dong.ogg', '/dong.ogg', '/sounds/dong.wav', '/dong.wav']),
+        loadSound(['/sounds/ka.ogg', '/ka.ogg', '/sounds/ka.wav', '/ka.wav']),
+        loadSound(['/sounds/balloon.ogg', '/balloon.ogg', '/sounds/balloon.wav', '/balloon.wav']),
       ]);
 
-      if (dong) this.dongBuffer = dong;
-      if (ka) this.kaBuffer = ka;
-      if (balloon) this.balloonBuffer = balloon;
+      this.dongBuffer = dong || this.createSynthesizedDongBuffer(ctx);
+      this.kaBuffer = ka || this.createSynthesizedKaBuffer(ctx);
+      this.balloonBuffer = balloon || this.createSynthesizedBalloonBuffer(ctx);
     } catch (_) {
-      /* fallback synthesis used if fetch fails */
+      // Fallback synthesizer if network fetch fails
+      this.dongBuffer = this.dongBuffer || this.createSynthesizedDongBuffer(ctx);
+      this.kaBuffer = this.kaBuffer || this.createSynthesizedKaBuffer(ctx);
+      this.balloonBuffer = this.balloonBuffer || this.createSynthesizedBalloonBuffer(ctx);
     } finally {
       this.isHitSoundsLoading = false;
     }
+  }
+
+  // Synthesized AudioBuffer generators as robust fallbacks
+  private createSynthesizedDongBuffer(ctx: AudioContext): AudioBuffer {
+    const sampleRate = ctx.sampleRate;
+    const duration = 0.3;
+    const length = Math.floor(sampleRate * duration);
+    const buffer = ctx.createBuffer(1, length, sampleRate);
+    const channel = buffer.getChannelData(0);
+
+    let phaseSine = 0;
+    let phaseSub = 0;
+    for (let i = 0; i < length; i++) {
+      const t = i / sampleRate;
+      const freq = 50 + 140 * Math.exp(-t * 25);
+      const subFreq = 35 + 50 * Math.exp(-t * 20);
+      phaseSine += (2 * Math.PI * freq) / sampleRate;
+      phaseSub += (2 * Math.PI * subFreq) / sampleRate;
+
+      const env = Math.exp(-t * 12);
+      const body = Math.sin(phaseSine) * 0.7 + Math.sin(phaseSub) * 0.4;
+      const transient = (Math.random() * 2 - 1) * Math.exp(-t * 150) * 0.4;
+      channel[i] = (body + transient) * env * 0.9;
+    }
+    return buffer;
+  }
+
+  private createSynthesizedKaBuffer(ctx: AudioContext): AudioBuffer {
+    const sampleRate = ctx.sampleRate;
+    const duration = 0.18;
+    const length = Math.floor(sampleRate * duration);
+    const buffer = ctx.createBuffer(1, length, sampleRate);
+    const channel = buffer.getChannelData(0);
+
+    let phaseChirp = 0;
+    for (let i = 0; i < length; i++) {
+      const t = i / sampleRate;
+      const freq = 350 + 550 * Math.exp(-t * 40);
+      phaseChirp += (2 * Math.PI * freq) / sampleRate;
+
+      const env = Math.exp(-t * 30);
+      const chirp = Math.sin(phaseChirp) * 0.5;
+      const noise = (Math.random() * 2 - 1) * Math.exp(-t * 50) * 0.6;
+      channel[i] = (chirp + noise) * env * 0.85;
+    }
+    return buffer;
+  }
+
+  private createSynthesizedBalloonBuffer(ctx: AudioContext): AudioBuffer {
+    const sampleRate = ctx.sampleRate;
+    const duration = 0.25;
+    const length = Math.floor(sampleRate * duration);
+    const buffer = ctx.createBuffer(1, length, sampleRate);
+    const channel = buffer.getChannelData(0);
+
+    let phaseRes = 0;
+    for (let i = 0; i < length; i++) {
+      const t = i / sampleRate;
+      const initialPop = (Math.random() * 2 - 1) * Math.exp(-t * 250) * 1.0;
+      const freq = 80 + 370 * Math.exp(-t * 18);
+      phaseRes += (2 * Math.PI * freq) / sampleRate;
+      const resonance = Math.sin(phaseRes) * Math.exp(-t * 15) * 0.6;
+      channel[i] = (initialPop + resonance) * Math.exp(-t * 10);
+    }
+    return buffer;
   }
 
   public async loadAudioFile(file: File): Promise<number> {
@@ -217,6 +286,13 @@ export class AudioEngine {
     this.notifyTimeUpdate(0);
   }
 
+  public clearAudio(): void {
+    this.stop();
+    this.audioBuffer = null;
+    this.waveformPeaks = null;
+    this.pauseOffset = 0;
+  }
+
   public seek(timeSeconds: number): void {
     const wasPlaying = this.isPlaying;
     if (wasPlaying) this.pause();
@@ -264,81 +340,53 @@ export class AudioEngine {
     if (this.sfxMuted) return;
 
     const ctx = this.initContext();
+    if (ctx.state === 'suspended' || (ctx.state as string) === 'interrupted') {
+      ctx.resume().catch(() => {});
+    }
+
     const now = ctx.currentTime;
     const masterVol = this.sfxVolume;
 
-    // Helper to play AudioBuffer
+    // Ensure buffers are available even before async network loading finishes
+    if (!this.dongBuffer) this.dongBuffer = this.createSynthesizedDongBuffer(ctx);
+    if (!this.kaBuffer) this.kaBuffer = this.createSynthesizedKaBuffer(ctx);
+    if (!this.balloonBuffer) this.balloonBuffer = this.createSynthesizedBalloonBuffer(ctx);
+
+    // Helper to play AudioBuffer using a newly instantiated AudioBufferSourceNode every time
     const playBuffer = (buffer: AudioBuffer, volMultiplier = 1.0) => {
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
+      const sourceNode = ctx.createBufferSource();
+      sourceNode.buffer = buffer;
       const gainNode = ctx.createGain();
       gainNode.gain.setValueAtTime(masterVol * volMultiplier, now);
-      source.connect(gainNode);
+
+      sourceNode.connect(gainNode);
       gainNode.connect(ctx.destination);
-      source.start(now);
+
+      sourceNode.start(now);
+
+      sourceNode.onended = () => {
+        try {
+          sourceNode.disconnect();
+          gainNode.disconnect();
+        } catch (_) {
+          /* ignore cleanup errors */
+        }
+      };
     };
 
     // Dong: Type 1 (Don), Type 3 (Big Don), Type 5 (Roll), Type 6 (Big Roll)
     if (type === 1 || type === 3 || type === 5 || type === 6) {
-      if (this.dongBuffer) {
-        const isBig = type === 3 || type === 6;
-        playBuffer(this.dongBuffer, isBig ? 1.25 : 1.0);
-        return;
-      }
-      // Fallback Dong synthesis
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
       const isBig = type === 3 || type === 6;
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(isBig ? 130 : 170, now);
-      osc.frequency.exponentialRampToValueAtTime(35, now + 0.12);
-      gain.gain.setValueAtTime((isBig ? 0.9 : 0.7) * masterVol, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.12);
+      playBuffer(this.dongBuffer, isBig ? 1.25 : 1.0);
     }
     // Ka: Type 2 (Ka), Type 4 (Big Ka)
     else if (type === 2 || type === 4) {
-      if (this.kaBuffer) {
-        const isBig = type === 4;
-        playBuffer(this.kaBuffer, isBig ? 1.25 : 1.0);
-        return;
-      }
-      // Fallback Ka synthesis
       const isBig = type === 4;
-      const vol = (isBig ? 0.8 : 0.6) * masterVol;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(isBig ? 600 : 850, now);
-      osc.frequency.exponentialRampToValueAtTime(200, now + 0.08);
-      gain.gain.setValueAtTime(vol, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.08);
+      playBuffer(this.kaBuffer, isBig ? 1.25 : 1.0);
     }
     // Balloon / Kusudama: Type 7 (Balloon), Type 8 (Kusudama)
     else if (type === 7 || type === 8) {
-      if (this.balloonBuffer) {
-        playBuffer(this.balloonBuffer, 1.1);
-        return;
-      }
-      // Fallback Balloon synthesis
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(440, now);
-      osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
-      gain.gain.setValueAtTime(0.7 * masterVol, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.1);
+      playBuffer(this.balloonBuffer, 1.1);
     }
   }
 

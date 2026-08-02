@@ -160,6 +160,22 @@ export async function getAudioFromDb(chartId: string): Promise<{ blob: Blob; fil
   });
 }
 
+export async function deleteAudioFromDb(chartId: string): Promise<void> {
+  return runWithRetry((db) => {
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = db.transaction('audio', 'readwrite');
+        const store = tx.objectStore('audio');
+        const req = store.delete(chartId);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  });
+}
+
 export async function getActiveProjectId(): Promise<string | null> {
   return runWithRetry((db) => {
     return new Promise((resolve, reject) => {

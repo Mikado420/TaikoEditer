@@ -7,7 +7,15 @@ import {
   TaikoChart,
   ZoomValue,
 } from '../types/chart';
-import { getScrollAtPosition, measureAndPosToTime, snapPosition, timeToMeasureAndPos } from '../utils/timeMath';
+import {
+  absMeasurePosToMeasureAndPos,
+  getAbsoluteMeasurePos,
+  getGogoIntervals,
+  getScrollAtPosition,
+  measureAndPosToTime,
+  snapPosition,
+  timeToMeasureAndPos,
+} from '../utils/timeMath';
 import { audioEngine } from '../audio/audioEngine';
 
 interface UnifiedEditorCanvasProps {
@@ -155,14 +163,20 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       ctx.strokeRect(0, miniMapTopY, width, miniMapHeight);
 
       // Mini-map notes & measure markers
-      const totalMeasures = Math.max(1, measures.length);
-      const miniMapWidthPerMeasure = width / Math.max(8, totalMeasures);
+      const totalMeasureUnits = Math.max(
+        1,
+        measures.length > 0
+          ? measures[measures.length - 1].startMeasurePos +
+              measures[measures.length - 1].measureLengthRatio
+          : 64
+      );
+      const miniMapWidthPerUnit = width / Math.max(8, totalMeasureUnits);
 
       // Render barlines in mini-map
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
       ctx.lineWidth = 1;
-      for (let m = 0; m <= totalMeasures; m++) {
-        const mx = m * miniMapWidthPerMeasure;
+      for (let m = 0; m < measures.length; m++) {
+        const mx = measures[m].startMeasurePos * miniMapWidthPerUnit;
         ctx.beginPath();
         ctx.moveTo(mx, miniMapTopY);
         ctx.lineTo(mx, miniMapTopY + miniMapHeight);
@@ -172,8 +186,8 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       // Render mini note dots
       for (const note of chart.notes) {
         if (note.type === 0) continue;
-        const noteMVal = note.measureIndex + note.positionInMeasure;
-        const nx = noteMVal * miniMapWidthPerMeasure;
+        const noteAbsPos = getAbsoluteMeasurePos(note.measureIndex, note.positionInMeasure, measures);
+        const nx = noteAbsPos * miniMapWidthPerUnit;
         const ny = miniMapTopY + miniMapHeight / 2;
         const isBig = note.type === 3 || note.type === 4 || note.type === 6;
         const nr = isBig ? 3.5 : 2.2;
@@ -193,10 +207,27 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         ctx.fill();
       }
 
+      // Compute GOGO Intervals
+      const gogoIntervals = getGogoIntervals(chart.events, measures);
+
+      // Render GOGO highlights on mini-map
+      for (const gogo of gogoIntervals) {
+        const gx1 = gogo.startAbsPos * miniMapWidthPerUnit;
+        const gx2 = gogo.endAbsPos * miniMapWidthPerUnit;
+        if (gx2 > 0 && gx1 < width) {
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.45)';
+          ctx.fillRect(gx1, miniMapTopY, Math.max(2, gx2 - gx1), miniMapHeight);
+        }
+      }
+
       // Current playback view frame indicator on Mini-Map
       const currentM = timeToMeasureAndPos(currentTime, measures);
-      const currentPosVal = currentM.measureIndex + currentM.positionInMeasure;
-      const playHeadMiniX = currentPosVal * miniMapWidthPerMeasure;
+      const currentPosAbs = getAbsoluteMeasurePos(
+        currentM.measureIndex,
+        currentM.positionInMeasure,
+        measures
+      );
+      const playHeadMiniX = currentPosAbs * miniMapWidthPerUnit;
 
       ctx.strokeStyle = '#FACC15';
       ctx.lineWidth = 1.5;
@@ -208,11 +239,69 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       // -------------------------------------------------------------
       // 2. Main Taiko Lane Strip
       // -------------------------------------------------------------
-      ctx.fillStyle = isPlayGogo ? '#220600' : '#121215';
+      ctx.fillStyle = '#121215';
       ctx.fillRect(0, laneTopY, width, laneHeight);
-      ctx.strokeStyle = isPlayGogo ? '#FF4400' : '#3F3F46';
+      ctx.strokeStyle = '#3F3F46';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(0, laneTopY, width, laneHeight);
+
+      // -------------------------------------------------------------
+      // 3. Render GOGO Time Section Backgrounds & Glowing Borders
+      // -------------------------------------------------------------
+      for (const gogo of gogoIntervals) {
+        const startX = judgeX + (gogo.startAbsPos - currentPosAbs) * pxPerMeasure;
+        const endX = judgeX + (gogo.endAbsPos - currentPosAbs) * pxPerMeasure;
+
+        if (endX >= 0 && startX <= width) {
+          const rectX = Math.max(0, startX);
+          const rectW = Math.max(1, Math.min(width, endX) - rectX);
+
+          // Rich warm glowing gradient fill for GOGO section
+          const grad = ctx.createLinearGradient(0, laneTopY, 0, laneTopY + laneHeight);
+          grad.addColorStop(0, 'rgba(239, 68, 68, 0.4)');
+          grad.addColorStop(0.5, 'rgba(185, 28, 28, 0.28)');
+          grad.addColorStop(1, 'rgba(239, 68, 68, 0.4)');
+
+          ctx.fillStyle = grad;
+          ctx.fillRect(rectX, laneTopY, rectW, laneHeight);
+
+          // Top & Bottom glowing orange borders
+          ctx.strokeStyle = '#FF4400';
+          ctx.lineWidth = 2.0;
+          ctx.beginPath();
+          ctx.moveTo(rectX, laneTopY + 1);
+          ctx.lineTo(rectX + rectW, laneTopY + 1);
+          ctx.moveTo(rectX, laneTopY + laneHeight - 1);
+          ctx.lineTo(rectX + rectW, laneTopY + laneHeight - 1);
+          ctx.stroke();
+
+          // Start boundary indicator with 🔥 GOGO label
+          if (startX >= 0 && startX <= width) {
+            ctx.strokeStyle = '#F97316';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(startX, laneTopY);
+            ctx.lineTo(startX, laneTopY + laneHeight);
+            ctx.stroke();
+
+            ctx.fillStyle = '#FF4400';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.fillText('🔥 GOGO TIME', startX + 5, laneTopY + 15);
+          }
+
+          // End boundary indicator
+          if (endX >= 0 && endX <= width) {
+            ctx.strokeStyle = '#EF4444';
+            ctx.lineWidth = 2.0;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(endX, laneTopY);
+            ctx.lineTo(endX, laneTopY + laneHeight);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+      }
 
       // -------------------------------------------------------------
       // 4. Judgment Ring (Golden Ring Frame matching reference screenshot)
@@ -272,12 +361,14 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       // 5. Grid Lines & Measure Barlines (SCROLL applied during play)
       // -------------------------------------------------------------
       for (let m = 0; m < measures.length; m++) {
+        const mInfo = measures[m];
         const mScroll = isPlaying ? getScrollAtPosition(m, 0, chart.events) : 1.0;
-        const mX = judgeX + (m - currentPosVal) * pxPerMeasure * mScroll;
+        const mAbs = mInfo.startMeasurePos;
+        const mX = judgeX + (mAbs - currentPosAbs) * pxPerMeasure * mScroll;
 
         if (mX >= -100 && mX <= width + 100) {
           // Major Measure Line
-          if (measures[m].barlineVisible) {
+          if (mInfo.barlineVisible) {
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -291,34 +382,41 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
             ctx.fillText(`${m + 1}`, mX + 5, laneTopY + 14);
           }
 
-          // Sub-grid ticks according to Snap
-          const ticksCount = Math.max(4, snap);
-          for (let t = 1; t < ticksCount; t++) {
-            const posInM = t / ticksCount;
-            const tickScroll = isPlaying ? getScrollAtPosition(m, posInM, chart.events) : 1.0;
-            const tickMVal = m + posInM;
-            const tickX = judgeX + (tickMVal - currentPosVal) * pxPerMeasure * tickScroll;
-            const isQuarter = t % (ticksCount / 4) === 0;
+          // Sub-grid ticks according to Snap & Time Signature (Only visible during edit mode)
+          if (!isPlaying) {
+            const N = mInfo.numerator;
+            const D = mInfo.denominator;
+            const ticksCount = Math.max(1, Math.round(snap * (N / D)));
 
-            if (tickX >= -20 && tickX <= width + 20) {
-              ctx.beginPath();
-              ctx.moveTo(tickX, laneTopY);
-              ctx.lineTo(tickX, laneTopY + laneHeight);
-              ctx.strokeStyle = isQuarter ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.08)';
-              ctx.lineWidth = 1;
-              ctx.stroke();
+            for (let t = 1; t < ticksCount; t++) {
+              const posInM = t / ticksCount;
+              const tickScroll = isPlaying ? getScrollAtPosition(m, posInM, chart.events) : 1.0;
+              const tickAbs = mAbs + posInM * mInfo.measureLengthRatio;
+              const tickX = judgeX + (tickAbs - currentPosAbs) * pxPerMeasure * tickScroll;
+              const isMainBeat = ticksCount % N === 0 ? t % (ticksCount / N) === 0 : false;
+
+              if (tickX >= -20 && tickX <= width + 20) {
+                ctx.beginPath();
+                ctx.moveTo(tickX, laneTopY);
+                ctx.lineTo(tickX, laneTopY + laneHeight);
+                ctx.strokeStyle = isMainBeat ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
+                ctx.lineWidth = isMainBeat ? 1.5 : 1.0;
+                ctx.stroke();
+              }
             }
           }
         }
       }
 
       // -------------------------------------------------------------
-      // 6. Draw Events (#SCROLL, #BPMCHANGE, #GOGO)
+      // 6. Draw Events (#SCROLL, #BPMCHANGE, #MEASURE, etc.)
       // -------------------------------------------------------------
       for (const ev of chart.events) {
+        if (ev.type === 'GOGOSTART' || ev.type === 'GOGOEND') continue;
+
         const evScroll = isPlaying ? getScrollAtPosition(ev.measureIndex, ev.positionInMeasure, chart.events) : 1.0;
-        const evMVal = ev.measureIndex + ev.positionInMeasure;
-        const evX = judgeX + (evMVal - currentPosVal) * pxPerMeasure * evScroll;
+        const evAbs = getAbsoluteMeasurePos(ev.measureIndex, ev.positionInMeasure, measures);
+        const evX = judgeX + (evAbs - currentPosAbs) * pxPerMeasure * evScroll;
 
         if (evX >= -50 && evX <= width + 50) {
           const color =
@@ -328,8 +426,6 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
               ? '#00B2FF'
               : ev.type === 'MEASURE'
               ? '#10B981'
-              : ev.type === 'GOGOSTART' || ev.type === 'GOGOEND'
-              ? '#F43F5E'
               : '#A855F7';
 
           ctx.strokeStyle = color;
@@ -353,8 +449,12 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       // 7. Active Pending Roll Start Point Line
       // -------------------------------------------------------------
       if (rollStartPoint) {
-        const rollStartMVal = rollStartPoint.measureIndex + rollStartPoint.positionInMeasure;
-        const rollStartX = judgeX + (rollStartMVal - currentPosVal) * pxPerMeasure;
+        const rollStartAbs = getAbsoluteMeasurePos(
+          rollStartPoint.measureIndex,
+          rollStartPoint.positionInMeasure,
+          measures
+        );
+        const rollStartX = judgeX + (rollStartAbs - currentPosAbs) * pxPerMeasure;
 
         ctx.strokeStyle = '#FFCC00';
         ctx.lineWidth = 2;
@@ -398,8 +498,8 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       const renderNotes = [...chart.notes]
         .filter((n) => n.type !== 0)
         .sort((a, b) => {
-          const posA = a.measureIndex + a.positionInMeasure;
-          const posB = b.measureIndex + b.positionInMeasure;
+          const posA = getAbsoluteMeasurePos(a.measureIndex, a.positionInMeasure, measures);
+          const posB = getAbsoluteMeasurePos(b.measureIndex, b.positionInMeasure, measures);
           return posB - posA;
         });
 
@@ -408,8 +508,8 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
         const noteScroll = getScrollAtPosition(note.measureIndex, note.positionInMeasure, chart.events);
         const effectiveScroll = isPlaying ? noteScroll : 1.0;
 
-        const noteMVal = note.measureIndex + note.positionInMeasure;
-        const noteX = judgeX + (noteMVal - currentPosVal) * pxPerMeasure * effectiveScroll;
+        const noteAbs = getAbsoluteMeasurePos(note.measureIndex, note.positionInMeasure, measures);
+        const noteX = judgeX + (noteAbs - currentPosAbs) * pxPerMeasure * effectiveScroll;
 
         if (noteX >= -120 && noteX <= width + 120) {
           const isSelected = selectedNoteIds.includes(note.id);
@@ -420,10 +520,10 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
           if (note.type === 5 || note.type === 6 || note.type === 7) {
             const duration = note.durationSeconds || 0.5;
             const endM = timeToMeasureAndPos(noteTime + duration, measures);
-            const endMVal = endM.measureIndex + endM.positionInMeasure;
+            const endAbs = getAbsoluteMeasurePos(endM.measureIndex, endM.positionInMeasure, measures);
             const endScroll = getScrollAtPosition(endM.measureIndex, endM.positionInMeasure, chart.events);
             const effectiveEndScroll = isPlaying ? endScroll : 1.0;
-            const endX = judgeX + (endMVal - currentPosVal) * pxPerMeasure * effectiveEndScroll;
+            const endX = judgeX + (endAbs - currentPosAbs) * pxPerMeasure * effectiveEndScroll;
 
             const bodyColor = note.type === 7 ? '#FB923C' : '#FACC15';
             ctx.fillStyle = bodyColor;
@@ -585,11 +685,11 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       // Scrub currentTime based on drag offset
       const deltaMeasures = -dx / pxPerMeasure;
       const startM = timeToMeasureAndPos(pointerRef.current.startTime, measures);
-      const targetM = Math.max(0, startM.measureIndex + startM.positionInMeasure + deltaMeasures);
-      const targetMIdx = Math.floor(targetM);
-      const targetPos = targetM - targetMIdx;
+      const startAbs = getAbsoluteMeasurePos(startM.measureIndex, startM.positionInMeasure, measures);
+      const targetAbs = Math.max(0, startAbs + deltaMeasures);
+      const { measureIndex, positionInMeasure } = absMeasurePosToMeasureAndPos(targetAbs, measures);
 
-      const newTime = measureAndPosToTime(targetMIdx, targetPos, measures);
+      const newTime = measureAndPosToTime(measureIndex, positionInMeasure, measures);
       onSeek(newTime);
     }
   };
@@ -608,19 +708,20 @@ export const UnifiedEditorCanvas: React.FC<UnifiedEditorCanvasProps> = ({
       const deltaMeasures = deltaX / pxPerMeasure;
 
       const currentM = timeToMeasureAndPos(currentTime, measures);
-      const targetM = Math.max(0, currentM.measureIndex + currentM.positionInMeasure + deltaMeasures);
-      const measureIndex = Math.floor(targetM);
-      const rawPos = targetM - measureIndex;
-      const snappedPos = snapPosition(rawPos, snap);
+      const currentAbs = getAbsoluteMeasurePos(currentM.measureIndex, currentM.positionInMeasure, measures);
+      const targetAbs = Math.max(0, currentAbs + deltaMeasures);
+      const { measureIndex, positionInMeasure } = absMeasurePosToMeasureAndPos(targetAbs, measures);
+
+      const mInfo = measures[measureIndex] || measures[0] || { numerator: 4, denominator: 4 };
+      const snappedPos = snapPosition(positionInMeasure, snap, mInfo.numerator, mInfo.denominator);
 
       const timeSeconds = measureAndPosToTime(measureIndex, snappedPos, measures);
 
       // Check if tapping existing note -> Delete
       const existingNote = chart.notes.find((n) => {
         if (n.type === 0) return false;
-        const noteMVal = n.measureIndex + n.positionInMeasure;
-        const currentMVal = currentM.measureIndex + currentM.positionInMeasure;
-        const noteX = judgeX + (noteMVal - currentMVal) * pxPerMeasure;
+        const noteAbs = getAbsoluteMeasurePos(n.measureIndex, n.positionInMeasure, measures);
+        const noteX = judgeX + (noteAbs - currentAbs) * pxPerMeasure;
         return Math.abs(noteX - clickX) < 22;
       });
 

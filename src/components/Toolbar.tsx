@@ -168,23 +168,46 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <span className="text-[10px] text-gray-500">Tap outside to close</span>
               </div>
 
-              {/* Snap */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-gray-300">
-                  <Grid size={14} className="text-amber-400" />
-                  <span>スナップ:</span>
+              {/* Snap / Division Count */}
+              <div className="flex flex-col gap-1.5 border-b border-[#2C2C2C] pb-2">
+                <div className="flex items-center justify-between text-gray-300">
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    <Grid size={14} className="text-amber-400" />
+                    <span>小節分割数:</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={1}
+                      max={192}
+                      value={snap}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val)) onChangeSnap(val);
+                      }}
+                      className="w-16 bg-[#2B2B2B] border border-[#3A3A3A] rounded px-2 py-1 text-right font-mono font-bold text-xs text-amber-300 focus:outline-none focus:border-amber-500"
+                    />
+                    <span className="text-gray-400 text-[11px]">分割</span>
+                  </div>
                 </div>
-                <select
-                  value={snap}
-                  onChange={(e) => onChangeSnap(parseInt(e.target.value, 10))}
-                  className="bg-[#2B2B2B] border border-[#3A3A3A] rounded px-2 py-0.5 text-gray-200 focus:outline-none font-semibold text-xs cursor-pointer"
-                >
-                  {[1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64].map((s) => (
-                    <option key={s} value={s}>
-                      1/{s}分
-                    </option>
+
+                {/* Preset Division Buttons */}
+                <div className="grid grid-cols-4 gap-1 mt-0.5">
+                  {[4, 8, 12, 16, 24, 32, 48, 64].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => onChangeSnap(preset)}
+                      className={`py-1 text-[10px] rounded font-mono font-semibold transition active:scale-95 ${
+                        snap === preset
+                          ? 'bg-amber-500 text-black shadow'
+                          : 'bg-[#2A2A2A] text-gray-300 hover:bg-[#383838]'
+                      }`}
+                    >
+                      {preset}
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
 
               {/* Zoom */}

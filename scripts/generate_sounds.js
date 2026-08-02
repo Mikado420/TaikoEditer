@@ -133,8 +133,16 @@ fs.writeFileSync('./public/dong.wav', dongBuf);
 fs.writeFileSync('./public/ka.wav', kaBuf);
 fs.writeFileSync('./public/balloon.wav', balloonBuf);
 
+fs.writeFileSync('./public/dong.ogg', dongBuf);
+fs.writeFileSync('./public/ka.ogg', kaBuf);
+fs.writeFileSync('./public/balloon.ogg', balloonBuf);
+
 fs.writeFileSync('./public/sounds/dong.wav', dongBuf);
 fs.writeFileSync('./public/sounds/ka.wav', kaBuf);
 fs.writeFileSync('./public/sounds/balloon.wav', balloonBuf);
 
-console.log('Successfully generated dong.wav, ka.wav, and balloon.wav');
+fs.writeFileSync('./public/sounds/dong.ogg', dongBuf);
+fs.writeFileSync('./public/sounds/ka.ogg', kaBuf);
+fs.writeFileSync('./public/sounds/balloon.ogg', balloonBuf);
+
+console.log('Successfully generated dong.wav, ka.wav, balloon.wav and ogg files');

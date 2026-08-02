@@ -12,6 +12,7 @@ import {
   FileText,
   Sliders,
   FileCode,
+  Trash2,
 } from 'lucide-react';
 import { TaikoChart } from '../types/chart';
 
@@ -26,6 +27,7 @@ interface HeaderProps {
   onImportFile: (file: File) => void;
   onExportTja: () => void;
   onLoadAudio: (file: File) => void;
+  onDeleteAudio?: () => void;
   isAudioLoaded: boolean;
   audioFileName: string | null;
   pwaPrompt: any;
@@ -47,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   onImportFile,
   onExportTja,
   onLoadAudio,
+  onDeleteAudio,
   isAudioLoaded,
   audioFileName,
   pwaPrompt,
@@ -147,18 +150,39 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right: Right Panel Toggle & File Imports */}
       <div className="flex items-center gap-1 shrink-0">
-        <button
-          onClick={() => audioInputRef.current?.click()}
-          className={`flex items-center gap-1 px-2 py-1 rounded-lg border transition text-[11px] ${
-            isAudioLoaded
-              ? 'bg-emerald-950/70 border-emerald-600 text-emerald-300 font-bold'
-              : 'bg-[#222222] hover:bg-[#2C2C2C] border-[#383838] text-gray-300'
-          }`}
-          title={audioFileName || '音源ファイル (MP3/OGG/WAV) を選択'}
-        >
-          <Music size={13} className={isAudioLoaded ? 'text-emerald-400' : 'text-gray-400'} />
-          <span className="hidden md:inline">{isAudioLoaded ? '音源OK' : '音源'}</span>
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={() => audioInputRef.current?.click()}
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg border transition text-[11px] ${
+              isAudioLoaded
+                ? 'bg-emerald-950/70 border-emerald-600 text-emerald-300 font-bold'
+                : 'bg-[#222222] hover:bg-[#2C2C2C] border-[#383838] text-gray-300'
+            }`}
+            title={
+              isAudioLoaded
+                ? `音源: ${audioFileName} (IndexedDBに永続保存中 - 再クリックで変更)`
+                : '音源ファイル (MP3/OGG/WAV) を選択'
+            }
+          >
+            <Music size={13} className={isAudioLoaded ? 'text-emerald-400' : 'text-gray-400'} />
+            <span className="hidden md:inline max-w-[100px] truncate">
+              {isAudioLoaded ? audioFileName || '音源OK' : '音源'}
+            </span>
+          </button>
+          {isAudioLoaded && onDeleteAudio && (
+            <button
+              onClick={() => {
+                if (confirm('保存済みの音源ファイルを削除しますか？')) {
+                  onDeleteAudio();
+                }
+              }}
+              className="p-1 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg transition"
+              title="音源ファイルを削除"
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
+        </div>
 
         <button
           onClick={() => fileInputRef.current?.click()}

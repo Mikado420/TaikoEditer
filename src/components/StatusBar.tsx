@@ -85,7 +85,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         )}
 
         <div className="flex items-center gap-1 text-gray-400 hidden md:flex">
-          <span>Snap: 1/{snap}</span>
+          <span>分割: {snap}</span>
           <span>|</span>
           <span>Zoom: {(zoom * 100).toFixed(0)}%</span>
         </div>

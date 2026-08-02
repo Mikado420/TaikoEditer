@@ -7,7 +7,14 @@ import {
   TaikoChart,
   ZoomValue,
 } from '../../types/chart';
-import { measureAndPosToTime, snapPosition, timeToMeasureAndPos } from '../../utils/timeMath';
+import {
+  absMeasurePosToMeasureAndPos,
+  getAbsoluteMeasurePos,
+  getGogoIntervals,
+  measureAndPosToTime,
+  snapPosition,
+  timeToMeasureAndPos,
+} from '../../utils/timeMath';
 import { audioEngine } from '../../audio/audioEngine';
 
 interface TimelineCanvasProps {
@@ -94,12 +101,14 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
       // Scroll position tracking playhead
       const playheadM = timeToMeasureAndPos(currentTime, measures);
-      const scrollX = Math.max(
-        0,
-        (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure - width * 0.25
+      const playheadAbs = getAbsoluteMeasurePos(
+        playheadM.measureIndex,
+        playheadM.positionInMeasure,
+        measures
       );
-      const playheadX =
-        (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure - scrollX;
+      const playheadMeasPx = playheadAbs * pxPerMeasure;
+      const scrollX = Math.max(0, playheadMeasPx - width * 0.25);
+      const playheadX = playheadMeasPx - scrollX;
 
       ctx.save();
       ctx.translate(-scrollX, 0);
@@ -123,6 +132,48 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.fillRect(scrollX, headerH + waveformH, width, 1);
       ctx.fillRect(scrollX, headerH + waveformH + eventsH, width, 1);
 
+      // 1b. GOGO Time Background Overlay
+      const gogoIntervals = getGogoIntervals(chart.events, measures);
+      const notesLaneTop = headerH + waveformH + eventsH;
+      const notesLaneH = height - notesLaneTop;
+
+      for (const gogo of gogoIntervals) {
+        const startX = gogo.startAbsPos * pxPerMeasure;
+        const endX = gogo.endAbsPos * pxPerMeasure;
+        if (endX >= scrollX - 50 && startX <= scrollX + width + 50) {
+          const rectX = Math.max(scrollX, startX);
+          const rectW = Math.max(1, Math.min(scrollX + width, endX) - rectX);
+
+          // Warm red translucent background fill
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
+          ctx.fillRect(rectX, notesLaneTop, rectW, notesLaneH);
+
+          // Top and bottom accent border
+          ctx.strokeStyle = '#FF4400';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(rectX, notesLaneTop);
+          ctx.lineTo(rectX + rectW, notesLaneTop);
+          ctx.moveTo(rectX, height - 1);
+          ctx.lineTo(rectX + rectW, height - 1);
+          ctx.stroke();
+
+          // Start line boundary
+          if (startX >= scrollX - 20 && startX <= scrollX + width + 20) {
+            ctx.strokeStyle = '#F97316';
+            ctx.lineWidth = 2.0;
+            ctx.beginPath();
+            ctx.moveTo(startX, notesLaneTop);
+            ctx.lineTo(startX, height);
+            ctx.stroke();
+
+            ctx.fillStyle = '#FF4400';
+            ctx.font = 'bold 9px sans-serif';
+            ctx.fillText('🔥 GOGO', startX + 4, notesLaneTop + 12);
+          }
+        }
+      }
+
       // 2. Waveform Background
       if (audioPeaks && audioPeaks.length > 0) {
         ctx.fillStyle = 'rgba(0, 204, 255, 0.35)';
@@ -130,10 +181,9 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
         const step = 2;
 
         for (let px = Math.floor(scrollX); px < scrollX + width; px += step) {
-          const mRatio = px / pxPerMeasure;
-          const mIdx = Math.floor(mRatio);
-          const posRatio = mRatio - mIdx;
-          const t = measureAndPosToTime(mIdx, posRatio, measures);
+          const absPos = px / pxPerMeasure;
+          const { measureIndex, positionInMeasure } = absMeasurePosToMeasureAndPos(absPos, measures);
+          const t = measureAndPosToTime(measureIndex, positionInMeasure, measures);
 
           if (t >= 0 && t <= totalDuration) {
             const peakIdx = Math.floor((t / totalDuration) * audioPeaks.length);
@@ -145,13 +195,11 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       }
 
       // 3. Grid Lines & Measures
-      const startM = Math.max(0, Math.floor(scrollX / pxPerMeasure));
-      const endM = Math.min(measures.length, Math.ceil((scrollX + width) / pxPerMeasure) + 1);
+      for (let m = 0; m < measures.length; m++) {
+        const mInfo = measures[m];
+        const mX = mInfo.startMeasurePos * pxPerMeasure;
 
-      for (let m = startM; m < endM; m++) {
-        const mX = m * pxPerMeasure;
-
-        if (mX >= scrollX - 50 && mX <= scrollX + width + 50) {
+        if (mX >= scrollX - 100 && mX <= scrollX + width + 100) {
           // Major Measure Barline
           ctx.strokeStyle = '#555555';
           ctx.lineWidth = 2;
@@ -165,25 +213,36 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           ctx.font = 'bold 11px sans-serif';
           ctx.fillText(`M${m + 1}`, mX + 5, 15);
 
-          // Grid ticks according to Snap
-          const ticksCount = Math.max(4, snap);
-          for (let t = 1; t < ticksCount; t++) {
-            const tickX = mX + (t / ticksCount) * pxPerMeasure;
-            const isQuarter = t % (ticksCount / 4) === 0;
+          // Grid ticks according to Snap & Time Signature (Only visible during edit mode, hidden during playback)
+          if (!isPlaying) {
+            const N = mInfo.numerator;
+            const D = mInfo.denominator;
+            const ticksCount = Math.max(1, Math.round(snap * (N / D)));
 
-            ctx.beginPath();
-            ctx.moveTo(tickX, isQuarter ? headerH : headerH + waveformH + eventsH);
-            ctx.lineTo(tickX, height);
-            ctx.strokeStyle = isQuarter ? '#383838' : '#262626';
-            ctx.lineWidth = 1;
-            ctx.stroke();
+            for (let t = 1; t < ticksCount; t++) {
+              const tickAbs = mInfo.startMeasurePos + (t / ticksCount) * mInfo.measureLengthRatio;
+              const tickX = tickAbs * pxPerMeasure;
+              const isMainBeat = ticksCount % N === 0 ? t % (ticksCount / N) === 0 : false;
+
+              if (tickX >= scrollX - 20 && tickX <= scrollX + width + 20) {
+                ctx.beginPath();
+                ctx.moveTo(tickX, isMainBeat ? headerH : headerH + waveformH + eventsH);
+                ctx.lineTo(tickX, height);
+                ctx.strokeStyle = isMainBeat ? '#444444' : '#262626';
+                ctx.lineWidth = isMainBeat ? 1.5 : 1.0;
+                ctx.stroke();
+              }
+            }
           }
         }
       }
 
       // 4. Draw Events Track
       for (const ev of chart.events) {
-        const evX = (ev.measureIndex + ev.positionInMeasure) * pxPerMeasure;
+        if (ev.type === 'GOGOSTART' || ev.type === 'GOGOEND') continue;
+
+        const evAbs = getAbsoluteMeasurePos(ev.measureIndex, ev.positionInMeasure, measures);
+        const evX = evAbs * pxPerMeasure;
         if (evX >= scrollX - 50 && evX <= scrollX + width + 50) {
           const evY = headerH + waveformH + 10;
 
@@ -196,8 +255,6 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
               ? '#00B2FF'
               : ev.type === 'MEASURE'
               ? '#10B981'
-              : ev.type === 'GOGOSTART' || ev.type === 'GOGOEND'
-              ? '#F43F5E'
               : '#A855F7';
           ctx.fill();
 
@@ -209,7 +266,12 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
       // 5. Draw Active Pending Roll Start Point Preview
       if (rollStartPoint) {
-        const startX = (rollStartPoint.measureIndex + rollStartPoint.positionInMeasure) * pxPerMeasure;
+        const startAbs = getAbsoluteMeasurePos(
+          rollStartPoint.measureIndex,
+          rollStartPoint.positionInMeasure,
+          measures
+        );
+        const startX = startAbs * pxPerMeasure;
         ctx.strokeStyle = '#FFCC00';
         ctx.lineWidth = 2;
         ctx.setLineDash([4, 4]);
@@ -228,7 +290,8 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       for (const note of chart.notes) {
         if (note.type === 0) continue;
 
-        const noteX = (note.measureIndex + note.positionInMeasure) * pxPerMeasure;
+        const noteAbs = getAbsoluteMeasurePos(note.measureIndex, note.positionInMeasure, measures);
+        const noteX = noteAbs * pxPerMeasure;
 
         if (noteX >= scrollX - 100 && noteX <= scrollX + width + 100) {
           const isSelected = selectedNoteIds.includes(note.id);
@@ -238,7 +301,8 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
           if (note.type === 5 || note.type === 6 || note.type === 7) {
             const duration = note.durationSeconds || 0.5;
             const endM = timeToMeasureAndPos(note.timeSeconds + duration, measures);
-            const endX = (endM.measureIndex + endM.positionInMeasure) * pxPerMeasure;
+            const endAbs = getAbsoluteMeasurePos(endM.measureIndex, endM.positionInMeasure, measures);
+            const endX = endAbs * pxPerMeasure;
 
             ctx.fillStyle = note.type === 7 ? 'rgba(255, 136, 0, 0.75)' : 'rgba(255, 204, 0, 0.75)';
             ctx.fillRect(noteX, notesLaneY - r / 2, Math.max(10, endX - noteX), r);
@@ -365,12 +429,11 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       // Horizontal Drag to Scrub Playhead / Scroll
       const deltaMeasures = -dx / pxPerMeasure;
       const startM = timeToMeasureAndPos(pointerRef.current.startTime, measures);
-      const newMeasureIdx = startM.measureIndex + deltaMeasures;
-      const targetM = Math.max(0, newMeasureIdx);
-      const targetMIdx = Math.floor(targetM);
-      const targetPos = targetM - targetMIdx;
+      const startAbs = getAbsoluteMeasurePos(startM.measureIndex, startM.positionInMeasure, measures);
+      const targetAbs = Math.max(0, startAbs + deltaMeasures);
+      const { measureIndex, positionInMeasure } = absMeasurePosToMeasureAndPos(targetAbs, measures);
 
-      const newTime = measureAndPosToTime(targetMIdx, targetPos, measures);
+      const newTime = measureAndPosToTime(measureIndex, positionInMeasure, measures);
       onSeek(newTime);
     }
   };
@@ -385,23 +448,26 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       const clickX = e.clientX - rect.left;
 
       const playheadM = timeToMeasureAndPos(currentTime, measures);
-      const scrollX = Math.max(
-        0,
-        (playheadM.measureIndex + playheadM.positionInMeasure) * pxPerMeasure - rect.width * 0.25
+      const playheadAbs = getAbsoluteMeasurePos(
+        playheadM.measureIndex,
+        playheadM.positionInMeasure,
+        measures
       );
+      const scrollX = Math.max(0, playheadAbs * pxPerMeasure - rect.width * 0.25);
 
       const targetX = clickX + scrollX;
-      const exactMeasure = targetX / pxPerMeasure;
-      const measureIndex = Math.max(0, Math.floor(exactMeasure));
-      const rawPos = exactMeasure - measureIndex;
-      const snappedPos = snapPosition(rawPos, snap);
+      const exactAbs = targetX / pxPerMeasure;
+      const { measureIndex, positionInMeasure } = absMeasurePosToMeasureAndPos(exactAbs, measures);
+      const mInfo = measures[measureIndex] || measures[0] || { numerator: 4, denominator: 4 };
+      const snappedPos = snapPosition(positionInMeasure, snap, mInfo.numerator, mInfo.denominator);
 
       const timeSeconds = measureAndPosToTime(measureIndex, snappedPos, measures);
 
       // Rule 1: Tap existing note -> Delete
       const existingNote = chart.notes.find((n) => {
         if (n.type === 0) return false;
-        const nX = (n.measureIndex + n.positionInMeasure) * pxPerMeasure;
+        const nAbs = getAbsoluteMeasurePos(n.measureIndex, n.positionInMeasure, measures);
+        const nX = nAbs * pxPerMeasure;
         return Math.abs(nX - targetX) < 18;
       });
 
